@@ -1,0 +1,13 @@
+{
+  "name": "tstouml",
+  "version": "1.0.0",
+  "description": "TypeScript to UML Class Diagram Converter",
+  "main": "src/main.ts",
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --target=es2020",
+    "dev": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --target=es2020 --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0"
+  }
+}

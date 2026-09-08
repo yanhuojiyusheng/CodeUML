@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TypeScript → Draw.io 类图</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,sans-serif;height:100vh;display:flex;flex-direction:column;background:#1a1a1a;color:#e0e0e0}
+header{padding:8px 16px;background:#252526;display:flex;align-items:center;gap:12px;border-bottom:1px solid #333}
+header h1{font-size:14px;font-weight:500;color:#ccc}
+button{padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font-size:12px;background:#0078d4;color:#fff}
+button:hover{background:#1a8fe8}
+main{flex:1;display:flex;overflow:hidden}
+#editor-pane{flex:1;overflow:auto;border-right:1px solid #333}
+#right-pane{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#view-tabs{display:flex;background:#252526;border-bottom:1px solid #333;padding:0 8px}
+.tab{padding:8px 16px;cursor:pointer;font-size:12px;color:#888;border-bottom:2px solid transparent;transition:all .2s}
+.tab:hover{color:#ccc}
+.tab.active{color:#fff;border-bottom-color:#0078d4}
+#diagram-view,#xml-view,#parsed-view{flex:1;overflow:auto;display:none}
+#diagram-view.active,#xml-view.active,#parsed-view.active{display:block}
+#diagram-view{background:#f8f8f8;padding:20px}
+textarea{width:100%;height:100%;background:#1e1e1e;color:#d4d4d4;border:none;padding:12px;font-family:'Fira Code','Cascadia Code',monospace;font-size:13px;resize:none;outline:none;line-height:1.5}
+#xml-view textarea,#parsed-view textarea{background:#1e1e1e;color:#d4d4d4}
+.status{padding:4px 16px;background:#007acc;color:#fff;font-size:11px}
+.class-box rect{stroke:#333;stroke-width:1.5;rx:2}
+.class-box text{font-family:system-ui,sans-serif;font-size:12px}
+.class-box .title{font-weight:bold;text-anchor:middle}
+.class-box .stereotype{font-style:italic;text-anchor:middle;fill:#666}
+.class-box .sep{stroke:#999;stroke-width:1}
+</style>
+</head>
+<body>
+<header>
+<h1>TypeScript → UML 类图</h1>
+<button onclick="exportDrawio()">导出 .drawio</button>
+<button onclick="exportSVG()">导出 SVG</button>
+</header>
+<main>
+<div id="editor-pane">
+<textarea id="code" spellcheck="false" placeholder="在此粘贴 TypeScript 代码...">enum Gender {
+  MALE,
+  FEMALE,
+  UNKNOWN
+}
+
+interface Pet {
+  name: string;
+  play(): void;
+}
+
+interface Flyable {
+  fly(): void;
+}
+
+abstract class Animal {
+  private id: string;
+  public name: string;
+  protected age: number;
+  private gender: Gender;
+  
+  constructor(name: string, age: number, gender: Gender) {
+    this.name = name;
+    this.age = age;
+    this.gender = gender;
+  }
+  
+  abstract makeSound(): void;
+  
+  getAge(): number {
+    return this.age;
+  }
+  
+  private generateId(): string {
+    return this.name;
+  }
+}
+
+class Dog extends Animal implements Pet {
+  private breed: string;
+  public owner: Person;
+  private friends: Dog[];
+  
+  constructor(name: string, age: number, gender: Gender, breed: string) {
+    super(name, age, gender);
+    this.breed = breed;
+  }
+  
+  makeSound(): void {
+    console.log("Woof!");
+  }
+  
+  play(): void {
+    console.log("playing");
+  }
+  
+  bark(): void {
+    console.log("Woof! Woof!");
+  }
+  
+  addFriend(dog: Dog): void {
+    this.friends.push(dog);
+  }
+}
+
+class Bird extends Animal implements Pet, Flyable {
+  private wingSpan: number;
+  public owner: Person | null;
+  
+  constructor(name: string, age: number, gender: Gender, wingSpan: number) {
+    super(name, age, gender);
+    this.wingSpan = wingSpan;
+    this.owner = null;
+  }
+  
+  makeSound(): void {
+    console.log("Chirp!");
+  }
+  
+  play(): void {
+    console.log("hopping");
+  }
+  
+  fly(): void {
+    console.log("flying");
+  }
+}
+
+class Cat extends Animal implements Pet {
+  private indoor: boolean;
+  
+  constructor(name: string, age: number, gender: Gender, indoor: boolean) {
+    super(name, age, gender);
+    this.indoor = indoor;
+  }
+  
+  makeSound(): void {
+    console.log("Meow!");
+  }
+  
+  play(): void {
+    console.log("playing");
+  }
+  
+  meow(): void {
+    console.log("Meow!");
+  }
+}
+
+class AdoptionRecord {
+  private adoptionDate: Date;
+  public fee: number;
+  private notes: string;
+  
+  constructor(adoptionDate: Date, fee: number, notes: string) {
+    this.adoptionDate = adoptionDate;
+    this.fee = fee;
+    this.notes = notes;
+  }
+}
+
+class Person {
+  private static instanceCount: number = 0;
+  public name: string;
+  private age: number;
+  private pets: Pet[];
+  
+  constructor(name: string, age: number) {
+    this.name = name;
+    this.age = age;
+  }
+  
+  adopt(pet: Pet, record: AdoptionRecord): void {
+    this.pets.push(pet);
+  }
+  
+  static getInstanceCount(): number {
+    return Person.instanceCount;
+  }
+  
+  getPets(): Pet[] {
+    return this.pets;
+  }
+}
+
+class Address {
+  public street: string;
+  public city: string;
+  public zipCode: string;
+  public country: string;
+  
+  constructor(street: string, city: string, zipCode: string, country: string) {
+    this.street = street;
+    this.city = city;
+    this.zipCode = zipCode;
+    this.country = country;
+  }
+}</textarea>
+</div>
+<div id="right-pane">
+<div id="view-tabs">
+<div class="tab active" data-view="diagram">图表</div>
+<div class="tab" data-view="xml">Draw.io XML</div>
+<div class="tab" data-view="parsed">解析结果</div>
+</div>
+<div id="diagram-view" class="active"></div>
+<div id="xml-view"><textarea id="xml-output" readonly></textarea></div>
+<div id="parsed-view"><textarea id="parsed-output" readonly></textarea></div>
+</div>
+</main>
+<div class="status" id="status">就绪</div>
+<script src="https://cdn.jsdelivr.net/npm/typescript@5.4.5/lib/typescript.min.js"></script>
+<script src="dist/bundle.js"></script>
+</body>
+</html>
