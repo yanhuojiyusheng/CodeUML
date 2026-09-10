@@ -17,7 +17,7 @@ function getReturnType(sig: any, sf: any): string {
   return sig.type.getText(sf);
 }
 
-// 清理类型文本，提取基本类型名
+// 清理类型文本，提取用户类型名列表
 function cleanTypeName(typeText: string): string {
   if (!typeText) return '';
   let name = typeText.trim();
@@ -38,27 +38,52 @@ function cleanTypeName(typeText: string): string {
     return cleanTypeName(name.slice(8, -1));
   }
   
-  // 处理 Record<K, V>
+  // 处理 Record<K, V> -> 返回 V（值类型）
   if (name.startsWith('Record<') && name.endsWith('>')) {
-    return 'Record';
+    const inner = name.slice(7, -1);
+    const commaIdx = inner.lastIndexOf(',');
+    if (commaIdx >= 0) {
+      return cleanTypeName(inner.slice(commaIdx + 1));
+    }
+    return cleanTypeName(inner);
   }
   
-  // 处理 Map<K, V>, Set<T> 等
-  if (name.startsWith('Map<') || name.startsWith('Set<') || 
-      name.startsWith('WeakMap<') || name.startsWith('WeakSet<')) {
-    return name.split('<')[0];
+  // 处理 Set<T>
+  if (name.startsWith('Set<') && name.endsWith('>')) {
+    return cleanTypeName(name.slice(4, -1));
+  }
+  if (name.startsWith('WeakSet<') && name.endsWith('>')) {
+    return cleanTypeName(name.slice(8, -1));
   }
   
-  // 处理联合类型：取第一个用户类型
+  // 处理 Map<K, V> -> 返回 K 和 V（用逗号分隔）
+  if (name.startsWith('Map<') && name.endsWith('>')) {
+    const inner = name.slice(4, -1);
+    const parts = splitGenericParams(inner);
+    return parts.map(p => cleanTypeName(p)).filter(Boolean).join(', ');
+  }
+  
+  // 处理工具类型：Partial<T>, Required<T>, Readonly<T>, Pick<T, K>, Omit<T, K> 等
+  const utilityTypes = ['Partial', 'Required', 'Readonly', 'Pick', 'Omit', 'Exclude', 'Extract', 'NonNullable'];
+  for (const util of utilityTypes) {
+    if (name.startsWith(util + '<') && name.endsWith('>')) {
+      const inner = name.slice(util.length + 1, -1);
+      const firstParam = splitGenericParams(inner)[0];
+      return cleanTypeName(firstParam);
+    }
+  }
+  
+  // 处理联合类型：拆分并返回所有用户类型
   if (name.includes('|')) {
     const parts = name.split('|').map((s: string) => s.trim());
+    const userTypes: string[] = [];
     for (const part of parts) {
       const cleaned = cleanTypeName(part);
       if (cleaned && !BASIC_TYPES.has(cleaned)) {
-        return cleaned;
+        userTypes.push(cleaned);
       }
     }
-    return '';
+    return userTypes.join(', ');
   }
   
   // 处理泛型类型：提取基础类型
@@ -67,6 +92,27 @@ function cleanTypeName(typeText: string): string {
   }
   
   return name;
+}
+
+/** 拆分泛型参数（处理嵌套泛型） */
+function splitGenericParams(params: string): string[] {
+  const result: string[] = [];
+  let depth = 0;
+  let current = '';
+  
+  for (const char of params) {
+    if (char === '<') depth++;
+    if (char === '>') depth--;
+    if (char === ',' && depth === 0) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  if (current.trim()) result.push(current.trim());
+  
+  return result;
 }
 
 // 判断类型是否是数组
@@ -91,6 +137,7 @@ function getMultiplicity(typeText: string): string {
 // 基本类型列表（扩充）
 const BASIC_TYPES = new Set([
   'string', 'number', 'boolean', 'any', 'void', 'never', 'unknown', 'object',
+  'null', 'undefined',
   'String', 'Number', 'Boolean',  // 包装类型
   'BigInt', 'bigint',
   'Symbol', 'symbol',
@@ -112,6 +159,23 @@ function isUserType(typeName: string, knownTypes: Set<string>): boolean {
   if (typeName.startsWith('typeof ') || typeName.startsWith('keyof ') || typeName.startsWith('import(')) return false;
   if (typeName.startsWith('{') || typeName.startsWith('[')) return false; // 元组和对象字面量
   return knownTypes.has(typeName);
+}
+
+// 从类型文本中提取所有用户定义的类型（用于关系生成，支持联合类型拆分）
+function extractUserTypes(typeText: string, knownTypes: Set<string>): string[] {
+  if (!typeText) return [];
+  const cleaned = cleanTypeName(typeText);
+  if (!cleaned) return [];
+  
+  // cleanTypeName 可能返回逗号分隔的多个类型（联合类型、Map 等）
+  const parts = cleaned.split(',').map((s: string) => s.trim()).filter(Boolean);
+  const result: string[] = [];
+  for (const part of parts) {
+    if (isUserType(part, knownTypes)) {
+      result.push(part);
+    }
+  }
+  return [...new Set(result)];
 }
 
 // 从参数中提取所有用户类型
@@ -377,79 +441,107 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
 
       // 收集属性类型和构造函数参数
       const propertyTypes = new Set<string>();
-      const constructorParamTypes = new Map<string, string>(); // paramName -> typeName
-      const composedTypes = new Set<string>();
+      const constructorParamNames = new Set<string>(); // 带修饰符的参数（属性）
+      // 属性条目：统一生成组合/聚合/关联关系（含字段和构造函数参数属性）
+      const propertyEntries: { fieldName: string; typeText: string; isOptional: boolean; isNew: boolean }[] = [];
       
       node.members.forEach((m: any) => {
         if (ts.isPropertyDeclaration(m)) {
-          const typeText = m.type?.getText(sf) || '';
-          const typeName = cleanTypeName(typeText);
-          if (typeName && isUserType(typeName, knownTypes)) {
-            propertyTypes.add(typeName);
+          let typeText = m.type?.getText(sf) || '';
+          let isNew = false;
+          
+          // 检查是否通过 new 创建（使用 AST）
+          if (m.initializer && ts.isNewExpression(m.initializer)) {
+            isNew = true;
+            // 没有类型注解时，从 new 表达式推断类型（例如：private b = new B()）
+            if (!typeText) {
+              const expr = m.initializer.expression;
+              if (expr && ts.isIdentifier(expr)) {
+                typeText = expr.text;
+              }
+            }
           }
           
-          // 检查是否通过 new 创建
-          if (m.initializer && m.initializer.getText(sf).startsWith('new ')) {
-            const initTypeName = cleanTypeName(m.initializer.getText(sf).replace(/^new\s+/, '').replace(/\([^)]*\)$/, ''));
-            if (initTypeName) composedTypes.add(initTypeName);
-          }
+          const types = extractUserTypes(typeText, knownTypes);
+          types.forEach(t => propertyTypes.add(t));
+          propertyEntries.push({
+            fieldName: m.name.getText(sf),
+            typeText,
+            isOptional: !!m.questionToken,
+            isNew
+          });
         } else if (ts.isConstructorDeclaration(m)) {
           m.parameters.forEach((p: any) => {
             const pType = p.type?.getText(sf) || 'any';
-            const typeName = cleanTypeName(pType);
-            if (typeName && isUserType(typeName, knownTypes)) {
-              constructorParamTypes.set(p.name.getText(sf), typeName);
+            
+            // 检查是否有修饰符（public/private/protected/readonly）
+            const hasModifier = p.modifiers?.some((mod: any) => 
+              mod.kind === ts.SyntaxKind.PublicKeyword ||
+              mod.kind === ts.SyntaxKind.PrivateKeyword ||
+              mod.kind === ts.SyntaxKind.ProtectedKeyword ||
+              mod.kind === ts.SyntaxKind.ReadonlyKeyword
+            );
+            
+            if (hasModifier) {
+              // 有修饰符 -> 参数属性，视为字段（关联），不是依赖
+              constructorParamNames.add(p.name.getText(sf));
+              const types = extractUserTypes(pType, knownTypes);
+              types.forEach(t => propertyTypes.add(t));
+              propertyEntries.push({
+                fieldName: p.name.getText(sf),
+                typeText: pType,
+                isOptional: false,
+                isNew: false
+              });
             }
           });
         }
       });
 
-      // 组合/聚合关系（属性类型）
+      // 组合/聚合关系（属性类型，含构造函数参数属性）
       const relationMap = new Map<string, { type: 'association' | 'aggregation' | 'composition', fields: string[], multiplicity: string }>();
       
-      node.members.forEach((m: any) => {
-        if (!ts.isPropertyDeclaration(m)) return;
-        
-        const typeText = m.type?.getText(sf) || '';
-        const typeName = cleanTypeName(typeText);
-        if (!typeName || !isUserType(typeName, knownTypes) || typeName === node.name.text) return;
-        
-        const fieldName = m.name.getText(sf);
-        const isOptional = !!m.questionToken; // BUG-2 修复：检查 questionToken
-        const isArray = isArrayType(typeText);
-        const isNew = composedTypes.has(typeName);
-        
-        // BUG-1 修复：根据类型判断关系
-        let relType: 'association' | 'aggregation' | 'composition';
-        let multiplicity: string;
-        
-        if (isNew) {
-          // new 创建 -> 组合
-          relType = 'composition';
-          multiplicity = '1';
-        } else if (isArray) {
-          // 数组/集合类型 -> 聚合
-          relType = 'aggregation';
-          multiplicity = '*';
-        } else {
-          // 普通类型引用 -> 关联
-          relType = 'association';
-          multiplicity = isOptional ? '0..1' : '1';
+      for (const entry of propertyEntries) {
+        const typeNames = extractUserTypes(entry.typeText, knownTypes);
+        for (const typeName of typeNames) {
+          if (typeName === node.name.text) continue;
+          
+          const fieldName = entry.fieldName;
+          const isArray = isArrayType(entry.typeText);
+          const isOptional = entry.isOptional || isOptionalType(entry.typeText);
+          const isNew = entry.isNew;
+          
+          let relType: 'association' | 'aggregation' | 'composition';
+          let multiplicity: string;
+          
+          if (isNew) {
+            // new 创建 -> 组合
+            relType = 'composition';
+            multiplicity = '1';
+          } else if (isArray) {
+            // 数组/集合类型 -> 聚合
+            relType = 'aggregation';
+            multiplicity = '*';
+          } else {
+            // 普通类型引用 -> 关联
+            relType = 'association';
+            multiplicity = isOptional ? '0..1' : '1';
+          }
+          
+          const existing = relationMap.get(typeName);
+          if (existing) {
+            existing.fields.push(fieldName);
+            // 关系类型优先级：组合 > 聚合 > 关联
+            if (relType === 'composition') existing.type = 'composition';
+            else if (relType === 'aggregation' && existing.type === 'association') existing.type = 'aggregation';
+            // 多重性优先级：* > 0..1 > 1
+            if (multiplicity === '*') existing.multiplicity = '*';
+            else if (multiplicity === '0..1' && existing.multiplicity === '1') existing.multiplicity = '0..1';
+          } else {
+            relationMap.set(typeName, { type: relType, fields: [fieldName], multiplicity });
+          }
         }
-        
-        if (relationMap.has(typeName)) {
-          const existing = relationMap.get(typeName)!;
-          existing.fields.push(fieldName);
-          // 如果有数组，更新多重性为 *
-          if (isArray) existing.multiplicity = '*';
-          // 如果有组合，保持组合
-          if (isNew) existing.type = 'composition';
-          // 如果之前是关联但新的是聚合，升级为聚合
-          if (existing.type === 'association' && relType === 'aggregation') existing.type = 'aggregation';
-        } else {
-          relationMap.set(typeName, { type: relType, fields: [fieldName], multiplicity });
-        }
-      });
+      }
       
       // BUG-3 修复：生成关系（带标签）
       relationMap.forEach((info, typeName) => {
@@ -468,36 +560,52 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
       node.members.forEach((m: any) => {
         if (ts.isMethodDeclaration(m) || ts.isConstructorDeclaration(m)) {
           m.parameters.forEach((p: any) => {
+            const paramName = p.name.getText(sf);
+            
+            // 跳过构造函数参数属性（带修饰符的）
+            if (constructorParamNames.has(paramName)) return;
+            
             const paramType = p.type?.getText(sf) || '';
-            const typeName = cleanTypeName(paramType);
-            if (typeName && isUserType(typeName, knownTypes) && 
-                typeName !== node.name.text && !propertyTypes.has(typeName)) {
-              dependencyTypes.add(typeName);
+            for (const typeName of extractUserTypes(paramType, knownTypes)) {
+              if (typeName !== node.name.text && !propertyTypes.has(typeName)) {
+                dependencyTypes.add(typeName);
+              }
             }
           });
         }
         
         // 返回值类型也可能产生依赖
         if (ts.isMethodDeclaration(m) && m.type) {
-          const returnType = cleanTypeName(m.type.getText(sf));
-          if (returnType && isUserType(returnType, knownTypes) && 
-              returnType !== node.name.text && !propertyTypes.has(returnType)) {
-            dependencyTypes.add(returnType);
+          for (const returnType of extractUserTypes(m.type.getText(sf), knownTypes)) {
+            if (returnType !== node.name.text && !propertyTypes.has(returnType)) {
+              dependencyTypes.add(returnType);
+            }
           }
         }
         
-        // throw new ClassName() 也会产生依赖
+        // 遍历方法体中的 new 表达式
         if (ts.isMethodDeclaration(m) || ts.isConstructorDeclaration(m)) {
           const visitNode = (node: any) => {
+            // 处理 new 表达式
+            if (ts.isNewExpression(node)) {
+              const expr = node.expression;
+              if (expr && ts.isIdentifier(expr)) {
+                const typeName = expr.text;
+                if (typeName && isUserType(typeName, knownTypes) && 
+                    typeName !== node.name?.text && !propertyTypes.has(typeName)) {
+                  dependencyTypes.add(typeName);
+                }
+              }
+            }
+            // 处理 throw new
             if (ts.isThrowStatement(node) && node.expression) {
               if (ts.isNewExpression(node.expression)) {
                 const expr = node.expression.expression;
-                // 增加空值检查，只处理简单标识符（如 new Error()）
                 if (expr && ts.isIdentifier(expr)) {
-                  const errorTypeName = expr.text;
-                  if (errorTypeName && isUserType(errorTypeName, knownTypes) && 
-                      errorTypeName !== node.name?.text && !propertyTypes.has(errorTypeName)) {
-                    dependencyTypes.add(errorTypeName);
+                  const typeName = expr.text;
+                  if (typeName && isUserType(typeName, knownTypes) && 
+                      typeName !== node.name?.text && !propertyTypes.has(typeName)) {
+                    dependencyTypes.add(typeName);
                   }
                 }
               }

@@ -4,7 +4,8 @@ import { parseCode, parseCodeWithKnownTypes } from './parser';
 import { layoutDiagram, setLayoutConfig } from './layout';
 import { renderSVG, setDisplayConfig } from './renderer';
 import { generateDrawioXML } from './exporter';
-import { Diagram, ParsedData, Member, ClassInfo, Relation } from './types';
+import { ParsedData, ClassInfo, Relation } from './types';
+import { formatParsed, formatMergedPlantUML } from './plantuml';
 import { getElement } from './utils';
 
 // DOM 元素
@@ -44,15 +45,27 @@ let tabs: FileTab[] = [];
 let activeTabId: string | null = null;
 
 // 默认示例代码
-const DEFAULT_CODE = `// 示例代码 - 拖放多个 .ts 文件查看跨文件关系
+const DEFAULT_CODE = `// 领域模型与设计模式示例 - models.ts
+// 覆盖：枚举、接口、继承/实现、组合/聚合/关联/依赖、构造函数参数属性、getter/setter
+
+// 枚举：数字枚举 + 字符串枚举
 enum Gender {
   MALE,
   FEMALE,
   UNKNOWN
 }
 
+enum OrderStatus {
+  PENDING = "pending",
+  PAID = "paid",
+  SHIPPED = "shipped",
+  CANCELLED = "cancelled"
+}
+
+// 接口：可选的动物、可飞行的、可序列化的
 interface Pet {
   name: string;
+  owner?: Person;
   play(): void;
 }
 
@@ -60,111 +73,175 @@ interface Flyable {
   fly(): void;
 }
 
-abstract class Animal {
+interface Serializable {
+  serialize(): string;
+}
+
+// 抽象基类
+abstract class Animal implements Serializable {
   private id: string;
   public name: string;
   protected age: number;
   private gender: Gender;
-  
+  // 组合关系：内部 new 创建
+  private heart = new Heart();
+
   constructor(name: string, age: number, gender: Gender) {
     this.name = name;
     this.age = age;
     this.gender = gender;
   }
-  
+
   abstract makeSound(): void;
-  
+  abstract serialize(): string;
+
   getAge(): number {
     return this.age;
   }
 }
 
-class Dog extends Animal implements Pet {
-  private breed: string;
-  public owner: Person;
-  
-  constructor(name: string, age: number, gender: Gender, breed: string) {
-    super(name, age, gender);
-    this.breed = breed;
-  }
-  
-  makeSound(): void { console.log("Woof!"); }
-  play(): void { console.log("playing"); }
+class Heart {
+  public bpm: number = 72;
+  beat(): void {}
 }
 
-class Bird extends Animal implements Pet, Flyable {
+// 继承 + 多接口实现
+class Dog extends Animal implements Pet, Flyable {
+  private breed: string;
+  // 关联关系：普通引用类型
+  public owner: Person;
+  // 聚合关系：数组/集合
+  private toys: Toy[] = [];
+
+  constructor(name: string, age: number, gender: Gender, breed: string, owner: Person) {
+    super(name, age, gender);
+    this.breed = breed;
+    this.owner = owner;
+  }
+
+  makeSound(): void { console.log("Woof!"); }
+  serialize(): string { return JSON.stringify({ name: this.name, breed: this.breed }); }
+  play(): void { console.log("playing fetch"); }
+  // 依赖关系：方法参数与返回类型
+  fetch(toy: Toy): Toy | null {
+    return toy;
+  }
+}
+
+class Bird extends Animal implements Pet {
   private wingSpan: number;
-  
+
   constructor(name: string, age: number, gender: Gender, wingSpan: number) {
     super(name, age, gender);
     this.wingSpan = wingSpan;
   }
-  
+
   makeSound(): void { console.log("Chirp!"); }
+  serialize(): string { return this.name; }
   play(): void { console.log("hopping"); }
   fly(): void { console.log("flying"); }
 }
 
 class Cat extends Animal implements Pet {
   private indoor: boolean;
-  
+
   constructor(name: string, age: number, gender: Gender, indoor: boolean) {
     super(name, age, gender);
     this.indoor = indoor;
   }
-  
+
   makeSound(): void { console.log("Meow!"); }
-  play(): void { console.log("playing"); }
+  serialize(): string { return this.name; }
+  play(): void { console.log("playing with string"); }
 }
 
+class Toy {
+  public name: string;
+  constructor(name: string) {
+    this.name = name;
+  }
+}
+
+// 人：getter/setter + 可选属性 + 聚合
 class Person {
   public name: string;
+  private email?: string;
   private pets: Pet[];
-  
+
   constructor(name: string) {
     this.name = name;
     this.pets = [];
   }
-  
+
+  get id(): string {
+    return this.name.toLowerCase();
+  }
+
+  set displayEmail(value: string) {
+    this.email = value;
+  }
+
   adopt(pet: Pet): void {
     this.pets.push(pet);
   }
-}`;
+}
+`;
 
-const DEFAULT_CODE_2 = `// 第二个文件示例 - services.ts
-// 拖放更多文件查看跨包关系
+const DEFAULT_CODE_2 = `// 服务层与数据访问 - services.ts
+// 覆盖：跨文件依赖/关联、构造函数参数属性、可选返回、泛型剥壳
 
 class UserService {
+  // 关联：字段引用
   private database: Database;
   private logger: Logger;
-  
-  constructor(db: Database, logger: Logger) {
+
+  // 构造函数参数属性：public/private/readonly 自动成为字段
+  constructor(private repo: UserRepository, db: Database, logger: Logger) {
     this.database = db;
     this.logger = logger;
   }
-  
+
   findUser(id: string): User | null {
-    return null;
+    return this.repo.findById(id);
   }
-  
+
+  listUsers(): Promise<User[]> {
+    return this.repo.list();
+  }
+
   createUser(data: UserData): User {
     return {} as User;
   }
+
+  // 依赖：参数 + 返回值
+  deleteUser(deleter: UserDeleter, id: string): boolean {
+    return deleter.delete(id);
+  }
+}
+
+interface UserRepository {
+  findById(id: string): User | null;
+  list(): Promise<User[]>;
+}
+
+interface UserDeleter {
+  delete(id: string): boolean;
 }
 
 class Database {
   private connectionString: string;
-  
+
   constructor(connStr: string) {
     this.connectionString = connStr;
   }
-  
+
   query(sql: string): any[] {
     return [];
   }
 }
 
 class Logger {
+  private level: string = "info";
   log(message: string): void {}
   error(message: string): void {}
 }
@@ -178,7 +255,69 @@ interface User {
 interface UserData {
   name: string;
   email: string;
-}`;
+}
+`;
+
+const DEFAULT_CODE_3 = `// 第三方库与工具 - utils.ts
+// 覆盖：工具类型剥壳（Partial/Required/Record/Map/Set）、单例模式、静态成员、抽象静态
+
+// 泛型仓库：泛型参数 + Map 值类型关联
+class Repository<T> {
+  protected items: Map<string, T> = new Map();
+  private cache: Map<number, CacheEntry<T>> = new Map();
+
+  put(key: string, value: T): void {
+    this.items.set(key, value);
+  }
+
+  get(key: string): T | undefined {
+    return this.items.get(key);
+  }
+
+  list(): T[] {
+    return Array.from(this.items.values());
+  }
+}
+
+class CacheEntry<V> {
+  public value: V;
+  public timestamp: number;
+  constructor(value: V) {
+    this.value = value;
+    this.timestamp = Date.now();
+  }
+}
+
+// 单例模式 + 静态成员
+class Config {
+  private static instance: Config;
+  public static readonly VERSION: string = "1.0.0";
+  private constructor(public data: Record<string, Partial<User>>) {}
+
+  static getInstance(): Config {
+    if (!Config.instance) {
+      Config.instance = new Config({});
+    }
+    return Config.instance;
+  }
+
+  get(key: string): Partial<User> | undefined {
+    return this.data[key];
+  }
+}
+
+// 工具类型剥壳
+class UserStore {
+  private users: Required<Record<string, User>> = {} as any;
+  private partials: Partial<User>[] = [];
+  private ids: Set<string> = new Set();
+
+  save(user: User): void {
+    this.ids.add(user.id);
+    this.partials.push(user);
+  }
+}
+`;
 
 /** 生成唯一 ID */
 function generateId(): string {
@@ -419,147 +558,6 @@ function updateSingle() {
   }
 }
 
-/** 格式化成员 */
-function formatMember(m: Member): string {
-  const staticStr = m.isStatic ? '{static} ' : '';
-  const abstractStr = m.isAbstract ? '{abstract} ' : '';
-  
-  if (m.kind === 'property') {
-    return `${staticStr}${abstractStr}${m.modifier} ${m.name}${m.type ? ' : ' + m.type : ''}`;
-  }
-  if (m.name === 'constructor') {
-    return `${m.modifier} constructor(${m.params || ''})`;
-  }
-  return `${staticStr}${abstractStr}${m.modifier} ${m.name}(${m.params || ''})${m.type ? ' : ' + m.type : ''}`;
-}
-
-/** 格式化关系 */
-function formatRelation(r: Relation): string {
-  let arrow = '';
-  switch (r.type) {
-    case 'extends': arrow = '--|>'; break;
-    case 'implements': arrow = '..|>'; break;
-    case 'aggregation': arrow = 'o--'; break;
-    case 'composition': arrow = '*--'; break;
-    case 'dependency': arrow = '..>'; break;
-    case 'association': 
-    default: arrow = '-->';
-  }
-  
-  const fromMult = r.fromMultiplicity && r.fromMultiplicity !== '1' ? `"${r.fromMultiplicity}" ` : '';
-  const toMult = r.toMultiplicity && r.toMultiplicity !== '1' ? ` "${r.toMultiplicity}"` : '';
-  
-  let relStr = `${r.from}${fromMult} ${arrow}${toMult} ${r.to}`;
-  if (r.label && ['association', 'aggregation', 'composition'].includes(r.type)) {
-    relStr += ` : ${r.label}`;
-  }
-  return relStr;
-}
-
-/** 格式化单个文件的 PlantUML */
-function formatParsed(parsed: ParsedData, packageName?: string): string {
-  let text = '@startuml\n\n';
-  text += 'skinparam classAttributeIconSize 0\n';
-  text += 'skinparam shadowing false\n\n';
-  
-  if (packageName) {
-    text += `package "${packageName}" {\n`;
-  }
-  
-  parsed.classes.forEach(c => {
-    const indent = packageName ? '  ' : '';
-    if (c.isEnum) {
-      text += `${indent}enum "${c.name}" as ${c.name} {\n`;
-    } else if (c.isInterface) {
-      text += `${indent}interface "${c.name}" as ${c.name} {\n`;
-    } else if (c.isAbstract) {
-      text += `${indent}abstract class "${c.name}" as ${c.name} {\n`;
-    } else {
-      text += `${indent}class "${c.name}" as ${c.name} {\n`;
-    }
-    
-    const props = c.members.filter(m => m.kind === 'property');
-    const meths = c.members.filter(m => m.kind === 'method');
-    
-    props.forEach(m => { text += `${indent}  ${formatMember(m)}\n`; });
-    if (props.length && meths.length) { text += `${indent}  --\n`; }
-    meths.forEach(m => { text += `${indent}  ${formatMember(m)}\n`; });
-    
-    text += `${indent}}\n\n`;
-  });
-  
-  if (packageName) {
-    text += '}\n\n';
-  }
-  
-  parsed.relations.forEach(r => {
-    text += formatRelation(r) + '\n';
-  });
-  
-  return text + '\n@enduml';
-}
-
-/** 格式化合并的 PlantUML（按包分组） */
-function formatMergedPlantUML(allParsed: Map<string, ParsedData>, classPackageMap: Map<string, string>): string {
-  let text = '@startuml\n\n';
-  text += 'skinparam classAttributeIconSize 0\n';
-  text += 'skinparam shadowing false\n';
-  text += 'skinparam packageStyle rectangle\n\n';
-  
-  // 收集所有关系
-  const allRelations: Relation[] = [];
-  allParsed.forEach(parsed => {
-    allRelations.push(...parsed.relations);
-  });
-  
-  // 去重关系
-  const uniqueRelations: Relation[] = [];
-  const relationKeys = new Set<string>();
-  allRelations.forEach(r => {
-    const key = `${r.from}-${r.type}-${r.to}`;
-    if (!relationKeys.has(key)) {
-      relationKeys.add(key);
-      uniqueRelations.push(r);
-    }
-  });
-  
-  // 按包输出类
-  allParsed.forEach((parsed, packageName) => {
-    text += `package "${packageName}" {\n`;
-    
-    parsed.classes.forEach(c => {
-      if (c.isEnum) {
-        text += `  enum "${c.name}" as ${c.name} {\n`;
-      } else if (c.isInterface) {
-        text += `  interface "${c.name}" as ${c.name} {\n`;
-      } else if (c.isAbstract) {
-        text += `  abstract class "${c.name}" as ${c.name} {\n`;
-      } else {
-        text += `  class "${c.name}" as ${c.name} {\n`;
-      }
-      
-      const props = c.members.filter(m => m.kind === 'property');
-      const meths = c.members.filter(m => m.kind === 'method');
-      
-      props.forEach(m => { text += `    ${formatMember(m)}\n`; });
-      if (props.length && meths.length) { text += '    --\n'; }
-      meths.forEach(m => { text += `    ${formatMember(m)}\n`; });
-      
-      text += '  }\n';
-    });
-    
-    text += '}\n\n';
-  });
-  
-  // 输出所有关系
-  text += "' 关系\n";
-  uniqueRelations.forEach(r => {
-    text += formatRelation(r) + '\n';
-  });
-  
-  return text + '\n@enduml';
-}
-
 /** 下载文件 */
 function downloadFile(name: string, content: string, type: string) {
   const blob = new Blob([content], { type });
@@ -674,3 +672,4 @@ codeEl.addEventListener('input', () => {
 // 初始化 - 加载示例
 createTab('models', DEFAULT_CODE);
 createTab('services', DEFAULT_CODE_2);
+createTab('utils', DEFAULT_CODE_3);

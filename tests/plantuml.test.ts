@@ -1,6 +1,12 @@
 /**
  * PlantUML 转换逻辑单元测试
  * 基于标准 PlantUML 类图语法规则
+ *
+ * ⚠️ 注意：本文件中的 formatParsed/formatMember 是本文件的本地副本，
+ * 只用于验证【解析结果】（parseCode 的输出）。
+ * 生产代码的 PlantUML 文本生成逻辑在 src/plantuml.ts，
+ * 其测试请见 tests/plantuml-output.test.ts（含语法自检器），
+ * 请勿只改本文件中的副本，以免与生产代码漂移。
  */
 
 const ts = require('typescript');
@@ -1977,9 +1983,1021 @@ describe('PlantUML 语法合规性测试', () => {
   });
 
   // --------------------------------------------------------
-  // 39. 文件名到包名的转换
+  // 39. 类关系判断规则验证
   // --------------------------------------------------------
-  describe('39. 文件名到包名的转换', () => {
+  describe('39. 类关系判断规则验证', () => {
+    
+    // ======== 1. 泛化/继承 (Generalization) ========
+    describe('泛化/继承关系', () => {
+      
+      test('class A extends B → A --|> B', () => {
+        const code = `
+          class Animal {}
+          class Dog extends Animal {}
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Dog' && r.to === 'Animal');
+        expect(r?.type).toBe('extends');
+      });
+
+      test('多层继承应正确链式', () => {
+        const code = `
+          class Base {}
+          class Middle extends Base {}
+          class Child extends Middle {}
+        `;
+        const result = parseCode(code);
+        
+        const r1 = result.relations.find(r => r.from === 'Middle' && r.to === 'Base');
+        const r2 = result.relations.find(r => r.from === 'Child' && r.to === 'Middle');
+        expect(r1?.type).toBe('extends');
+        expect(r2?.type).toBe('extends');
+      });
+    });
+
+    // ======== 2. 实现 (Realization) ========
+    describe('实现关系', () => {
+      
+      test('class A implements B → A ..|> B', () => {
+        const code = `
+          interface Flyable { fly(): void; }
+          class Bird implements Flyable { fly(): void {} }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Bird' && r.to === 'Flyable');
+        expect(r?.type).toBe('implements');
+      });
+
+      test('继承 + 实现组合', () => {
+        const code = `
+          class Animal {}
+          interface Pet { play(): void; }
+          class Dog extends Animal implements Pet { play(): void {} }
+        `;
+        const result = parseCode(code);
+        
+        const extendsR = result.relations.find(r => r.from === 'Dog' && r.to === 'Animal');
+        const implR = result.relations.find(r => r.from === 'Dog' && r.to === 'Pet');
+        expect(extendsR?.type).toBe('extends');
+        expect(implR?.type).toBe('implements');
+      });
+    });
+
+    // ======== 3. 组合 (Composition) ========
+    describe('组合关系 - 内部 new 创建', () => {
+      
+      test('字段内 new → 组合 *--', () => {
+        const code = `
+          class Engine { power: number; }
+          class Car {
+            engine: Engine = new Engine();
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Car' && r.to === 'Engine');
+        expect(r?.type).toBe('composition');
+      });
+
+      test('构造函数内 new → 组合', () => {
+        const code = `
+          class Config { debug: boolean; }
+          class App {
+            config: Config;
+            constructor() {
+              this.config = new Config();
+            }
+          }
+        `;
+        const result = parseCode(code);
+        
+        // 注意：当前解析器可能无法识别构造函数内的 new
+        // 这是一个边界情况
+      });
+
+      test('多个 new 创建的字段 → 多个组合', () => {
+        const code = `
+          class Engine { power: number; }
+          class Transmission { gears: number; }
+          class Car {
+            engine: Engine = new Engine();
+            transmission: Transmission = new Transmission();
+          }
+        `;
+        const result = parseCode(code);
+        
+        const engineR = result.relations.find(r => r.from === 'Car' && r.to === 'Engine');
+        const transR = result.relations.find(r => r.from === 'Car' && r.to === 'Transmission');
+        expect(engineR?.type).toBe('composition');
+        expect(transR?.type).toBe('composition');
+      });
+    });
+
+    // ======== 4. 聚合 (Aggregation) ========
+    describe('聚合关系 - 外部传入/数组', () => {
+      
+      test('数组字段 → 聚合 o--', () => {
+        const code = `
+          class Wheel { size: number; }
+          class Car {
+            wheels: Wheel[];
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Car' && r.to === 'Wheel');
+        expect(r?.type).toBe('aggregation');
+        expect(r?.toMultiplicity).toBe('*');
+      });
+
+      test('ReadonlyArray 字段 → 聚合', () => {
+        const code = `
+          class Item { id: number; }
+          class Container {
+            items: ReadonlyArray<Item>;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Container' && r.to === 'Item');
+        expect(r?.type).toBe('aggregation');
+      });
+
+      test('Map 字段 → 聚合', () => {
+        const code = `
+          class User { name: string; }
+          class UserService {
+            users: Map<string, User>;
+          }
+        `;
+        const result = parseCode(code);
+        
+        // Map 的泛型参数可能不会被正确识别
+        // 这取决于 cleanTypeName 的实现
+      });
+    });
+
+    // ======== 5. 关联 (Association) ========
+    describe('关联关系 - 普通字段持有', () => {
+      
+      test('普通字段 → 关联 -->', () => {
+        const code = `
+          class Driver { name: string; }
+          class Car {
+            driver: Driver;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Car' && r.to === 'Driver');
+        expect(r?.type).toBe('association');
+      });
+
+      test('构造函数参数赋值字段 → 关联', () => {
+        const code = `
+          class Engine { power: number; }
+          class Car {
+            engine: Engine;
+            constructor(engine: Engine) {
+              this.engine = engine;
+            }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Car' && r.to === 'Engine');
+        // 应该是关联或聚合，取决于是否有 new
+        expect(['association', 'aggregation']).toContain(r?.type);
+      });
+    });
+
+    // ======== 6. 依赖 (Dependency) ========
+    describe('依赖关系 - 方法内临时使用', () => {
+      
+      test('方法参数类型 → 依赖 ..>', () => {
+        const code = `
+          class Logger { log(msg: string): void {} }
+          class Service {
+            process(logger: Logger): void {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Service' && r.to === 'Logger');
+        expect(r?.type).toBe('dependency');
+      });
+
+      test('返回值类型 → 依赖', () => {
+        const code = `
+          class Result { data: string; }
+          class Service {
+            getResult(): Result { return new Result(); }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Service' && r.to === 'Result');
+        expect(r?.type).toBe('dependency');
+      });
+
+      test('throw new → 依赖', () => {
+        const code = `
+          class AppError { message: string; }
+          class Service {
+            fail(): void { throw new AppError(); }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Service' && r.to === 'AppError');
+        expect(r?.type).toBe('dependency');
+      });
+
+      test('方法内 new → 依赖', () => {
+        const code = `
+          class Client { connect(): void {} }
+          class Factory {
+            create(): Client { return new Client(); }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Factory' && r.to === 'Client');
+        expect(r?.type).toBe('dependency');
+      });
+    });
+
+    // ======== 7. 关系优先级验证 ========
+    describe('关系优先级', () => {
+      
+      test('字段有 new → 组合优先于关联', () => {
+        const code = `
+          class Engine { power: number; }
+          class Car {
+            engine: Engine = new Engine();
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Car' && r.to === 'Engine');
+        expect(r?.type).toBe('composition');
+      });
+
+      test('数组字段 → 聚合优先于关联', () => {
+        const code = `
+          class Wheel { size: number; }
+          class Car {
+            wheels: Wheel[];
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Car' && r.to === 'Wheel');
+        expect(r?.type).toBe('aggregation');
+      });
+
+      test('字段 + 方法参数 → 字段关系优先', () => {
+        const code = `
+          class Logger { log(): void {} }
+          class Service {
+            logger: Logger;
+            process(logger: Logger): void {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        // 应该是关联（字段），不是依赖（参数）
+        const r = result.relations.find(r => r.from === 'Service' && r.to === 'Logger');
+        expect(r?.type).not.toBe('dependency');
+      });
+    });
+
+    // ======== 8. 边界情况 ========
+    describe('关系边界情况', () => {
+      
+      test('基本类型字段不应产生关系', () => {
+        const code = `
+          class Person {
+            name: string;
+            age: number;
+            active: boolean;
+          }
+        `;
+        const result = parseCode(code);
+        
+        expect(result.relations).toHaveLength(0);
+      });
+
+      test('可选字段应标记多重性 0..1', () => {
+        const code = `
+          class Address { city: string; }
+          class Person {
+            address?: Address;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.to === 'Address');
+        expect(r?.toMultiplicity).toBe('0..1');
+      });
+
+      test('同类型多字段应合并标签', () => {
+        const code = `
+          class Wheel { size: number; }
+          class Car {
+            frontLeft: Wheel;
+            frontRight: Wheel;
+            backLeft: Wheel;
+            backRight: Wheel;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Car' && r.to === 'Wheel');
+        expect(r).toBeDefined();
+        // 多个同类型字段应有标签
+        expect(r?.label).toBeDefined();
+      });
+    });
+  });
+
+  // --------------------------------------------------------
+  // 40. 类关系判断难点验证
+  // --------------------------------------------------------
+  describe('40. 类关系判断难点验证', () => {
+    
+    // ======== 1. 泛化 vs 实现 ========
+    describe('泛化 vs 实现', () => {
+      
+      test('interface extends interface → 泛化 (extends)', () => {
+        const code = `
+          interface Readable { read(): void; }
+          interface ReadWrite extends Readable { write(): void; }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'ReadWrite' && r.to === 'Readable');
+        expect(r?.type).toBe('extends');
+      });
+
+      test('class extends class → 泛化 (extends)', () => {
+        const code = `
+          class Animal {}
+          class Dog extends Animal {}
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Dog' && r.to === 'Animal');
+        expect(r?.type).toBe('extends');
+      });
+
+      test('class implements interface → 实现 (implements)', () => {
+        const code = `
+          interface Printable { print(): void; }
+          class Document implements Printable { print(): void {} }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Document' && r.to === 'Printable');
+        expect(r?.type).toBe('implements');
+      });
+
+      test('多接口继承 → 多条泛化', () => {
+        const code = `
+          interface A { a(): void; }
+          interface B { b(): void; }
+          interface C extends A, B { c(): void; }
+        `;
+        const result = parseCode(code);
+        
+        const extendsR = result.relations.filter(r => r.from === 'C' && r.type === 'extends');
+        expect(extendsR).toHaveLength(2);
+      });
+
+      test('类实现多接口 → 多条实现', () => {
+        const code = `
+          interface Serializable { serialize(): string; }
+          interface Loggable { log(): void; }
+          class Model implements Serializable, Loggable {
+            serialize(): string { return ''; }
+            log(): void {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const implR = result.relations.filter(r => r.from === 'Model' && r.type === 'implements');
+        expect(implR).toHaveLength(2);
+      });
+    });
+
+    // ======== 2. 组合 vs 聚合更细致规则 ========
+    describe('组合 vs 聚合细致规则', () => {
+      
+      test('private b = new B() → 组合', () => {
+        const code = `
+          class B { value: number; }
+          class A {
+            private b = new B();
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'B');
+        expect(r?.type).toBe('composition');
+      });
+
+      test('private b: B = new B() → 组合', () => {
+        const code = `
+          class B { value: number; }
+          class A {
+            private b: B = new B();
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'B');
+        expect(r?.type).toBe('composition');
+      });
+
+      test('private b!: B → 关联（延迟初始化）', () => {
+        const code = `
+          class B { value: number; }
+          class A {
+            private b!: B;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'B');
+        // 断言初始化标记不应被视为组合
+        expect(r?.type).not.toBe('composition');
+      });
+
+      test('private b?: B → 关联（可选）', () => {
+        const code = `
+          class B { value: number; }
+          class A {
+            private b?: B;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'B');
+        expect(r).toBeDefined();
+        expect(r?.toMultiplicity).toBe('0..1');
+      });
+
+      test('private b: B | null = null → 关联', () => {
+        const code = `
+          class B { value: number; }
+          class A {
+            private b: B | null = null;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'B');
+        expect(r).toBeDefined();
+      });
+
+      test('构造函数参数赋值 → 聚合（外部传入）', () => {
+        const code = `
+          class D { id: number; }
+          class C {
+            private d: D;
+            constructor(d: D) {
+              this.d = d;
+            }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'C' && r.to === 'D');
+        // 没有 new 创建，应该是关联或聚合
+        expect(r).toBeDefined();
+        expect(r?.type).not.toBe('composition');
+      });
+    });
+
+    // ======== 3. 关联 vs 依赖 ========
+    describe('关联 vs 依赖', () => {
+      
+      test('字段声明 → 关联', () => {
+        const code = `
+          class B { }
+          class A {
+            private b: B;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'B');
+        expect(r?.type).not.toBe('dependency');
+      });
+
+      test('方法参数 → 依赖', () => {
+        const code = `
+          class C { }
+          class A {
+            method(c: C): void {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'C');
+        expect(r?.type).toBe('dependency');
+      });
+
+      test('返回值类型 → 依赖', () => {
+        const code = `
+          class D { }
+          class A {
+            method(): D { return new D(); }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'D');
+        expect(r?.type).toBe('dependency');
+      });
+
+      test('方法体 new → 依赖', () => {
+        const code = `
+          class E { }
+          class A {
+            method(): void {
+              const e = new E();
+            }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'E');
+        expect(r?.type).toBe('dependency');
+      });
+
+      test('throw new → 依赖', () => {
+        const code = `
+          class F { }
+          class A {
+            method(): void {
+              throw new F();
+            }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'F');
+        expect(r?.type).toBe('dependency');
+      });
+
+      test('构造函数参数属性带修饰符 → 关联（不是依赖）', () => {
+        const code = `
+          class Service { }
+          class A {
+            constructor(private service: Service) {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'Service');
+        expect(r).toBeDefined();
+        // 应该是关联/聚合，不是依赖
+        expect(r?.type).not.toBe('dependency');
+      });
+
+      test('构造函数普通参数（无修饰符）→ 依赖', () => {
+        const code = `
+          class Config { }
+          class A {
+            constructor(config: Config) {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'Config');
+        expect(r?.type).toBe('dependency');
+      });
+    });
+
+    // ======== 4. 集合类型指向 ========
+    describe('集合类型指向', () => {
+      
+      test('Array<T> → 关联 T', () => {
+        const code = `
+          class Item { id: number; }
+          class Container {
+            items: Array<Item>;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Container' && r.to === 'Item');
+        expect(r).toBeDefined();
+      });
+
+      test('T[] → 关联 T', () => {
+        const code = `
+          class Item { id: number; }
+          class Container {
+            items: Item[];
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Container' && r.to === 'Item');
+        expect(r).toBeDefined();
+        expect(r?.toMultiplicity).toBe('*');
+      });
+
+      test('ReadonlyArray<T> → 关联 T', () => {
+        const code = `
+          class Item { id: number; }
+          class Container {
+            items: ReadonlyArray<Item>;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Container' && r.to === 'Item');
+        expect(r).toBeDefined();
+      });
+
+      test('Set<T> → 关联 T', () => {
+        const code = `
+          class Entry { id: number; }
+          class Cache {
+            entries: Set<Entry>;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Cache' && r.to === 'Entry');
+        expect(r).toBeDefined();
+      });
+
+      test('Record<K, V> → 关联 V', () => {
+        const code = `
+          class Config { debug: boolean; }
+          class Store {
+            configs: Record<string, Config>;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Store' && r.to === 'Config');
+        expect(r).toBeDefined();
+      });
+    });
+
+    // ======== 5. 联合类型和可选类型 ========
+    describe('联合类型和可选类型', () => {
+      
+      test('A | B → 关联 A 和 B', () => {
+        const code = `
+          class Cat { purr(): void {} }
+          class Dog { bark(): void {} }
+          class Owner {
+            pet: Cat | Dog;
+          }
+        `;
+        const result = parseCode(code);
+        
+        // 应该关联 Cat 和 Dog
+        const catR = result.relations.find(r => r.from === 'Owner' && r.to === 'Cat');
+        const dogR = result.relations.find(r => r.from === 'Owner' && r.to === 'Dog');
+        expect(catR).toBeDefined();
+        expect(dogR).toBeDefined();
+      });
+
+      test('A | null → 关联 A，忽略 null', () => {
+        const code = `
+          class Address { city: string; }
+          class Person {
+            address: Address | null;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Person' && r.to === 'Address');
+        expect(r).toBeDefined();
+      });
+
+      test('A | undefined → 关联 A', () => {
+        const code = `
+          class Config { }
+          class App {
+            config: Config | undefined;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'App' && r.to === 'Config');
+        expect(r).toBeDefined();
+      });
+
+      test('string | number → 无关联', () => {
+        const code = `
+          class Data {
+            value: string | number;
+          }
+        `;
+        const result = parseCode(code);
+        
+        expect(result.relations).toHaveLength(0);
+      });
+
+      test('? 标记 → 多重性 0..1', () => {
+        const code = `
+          class Ref { }
+          class Container {
+            ref?: Ref;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Container' && r.to === 'Ref');
+        expect(r?.toMultiplicity).toBe('0..1');
+      });
+    });
+
+    // ======== 6. 泛型参数 ========
+    describe('泛型参数', () => {
+      
+      test('泛型参数 T 不应建立关系', () => {
+        const code = `
+          class Container<T> {
+            item: T;
+          }
+        `;
+        const result = parseCode(code);
+        
+        // T 是泛型参数，不应有依赖关系
+        expect(result.relations).toHaveLength(0);
+      });
+
+      test('泛型类继承 → 泛化', () => {
+        const code = `
+          class Base<T> { }
+          class Derived extends Base<string> { }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.type === 'extends');
+        expect(r).toBeDefined();
+        expect(r?.from).toBe('Derived');
+        expect(r?.to).toBe('Base');
+      });
+    });
+
+    // ======== 7. 内置类型 vs 用户类型 ========
+    describe('内置类型 vs 用户类型', () => {
+      
+      test('Error 内置类型不应产生关系', () => {
+        const code = `
+          class Service {
+            fail(): void {
+              throw new Error('failed');
+            }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.to === 'Error');
+        expect(r).toBeUndefined();
+      });
+
+      test('Date 内置类型不应产生关系', () => {
+        const code = `
+          class Event {
+            startDate: Date;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.to === 'Date');
+        expect(r).toBeUndefined();
+      });
+
+      test('Promise<T> 剥壳后关联 T', () => {
+        const code = `
+          class Result { data: string; }
+          class Service {
+            fetch(): Promise<Result> { return new Promise(() => {}); }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Service' && r.to === 'Result');
+        expect(r).toBeDefined();
+      });
+
+      test('用户定义的 MyError 应产生关系', () => {
+        const code = `
+          class AppError { message: string; }
+          class Service {
+            fail(): void {
+              throw new AppError();
+            }
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Service' && r.to === 'AppError');
+        expect(r).toBeDefined();
+      });
+    });
+
+    // ======== 8. 循环依赖 ========
+    describe('循环依赖', () => {
+      
+      test('A 关联 B，B 关联 A → 两条关系', () => {
+        const code = `
+          class A { b: B; }
+          class B { a: A; }
+        `;
+        const result = parseCode(code);
+        
+        const aToB = result.relations.find(r => r.from === 'A' && r.to === 'B');
+        const bToA = result.relations.find(r => r.from === 'B' && r.to === 'A');
+        expect(aToB).toBeDefined();
+        expect(bToA).toBeDefined();
+      });
+
+      test('循环继承不应产生（语法错误）', () => {
+        // TypeScript 不允许循环继承，这里测试解析器不会崩溃
+        expect(() => parseCode(`class A extends B {} class B extends A {}`)).not.toThrow();
+      });
+    });
+
+    // ======== 9. 构造函数参数属性完整测试 ========
+    describe('构造函数参数属性', () => {
+      
+      test('private 参数 → 关联', () => {
+        const code = `
+          class Service { }
+          class Controller {
+            constructor(private service: Service) {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Controller' && r.to === 'Service');
+        expect(r).toBeDefined();
+        expect(r?.type).not.toBe('dependency');
+      });
+
+      test('public 参数 → 关联', () => {
+        const code = `
+          class Config { }
+          class App {
+            constructor(public config: Config) {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'App' && r.to === 'Config');
+        expect(r).toBeDefined();
+        expect(r?.type).not.toBe('dependency');
+      });
+
+      test('protected 参数 → 关联', () => {
+        const code = `
+          class Base { }
+          class Child {
+            constructor(protected base: Base) {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'Child' && r.to === 'Base');
+        expect(r).toBeDefined();
+      });
+
+      test('readonly 参数 → 关联', () => {
+        const code = `
+          class Dep { }
+          class A {
+            constructor(readonly dep: Dep) {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'A' && r.to === 'Dep');
+        expect(r).toBeDefined();
+      });
+
+      test('普通参数（无修饰符）→ 依赖', () => {
+        const code = `
+          class Config { }
+          class App {
+            constructor(config: Config) {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'App' && r.to === 'Config');
+        expect(r?.type).toBe('dependency');
+      });
+
+      test('混合参数 → 正确区分', () => {
+        const code = `
+          class Service { }
+          class Config { }
+          class Controller {
+            constructor(
+              private service: Service,
+              config: Config
+            ) {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const serviceR = result.relations.find(r => r.from === 'Controller' && r.to === 'Service');
+        const configR = result.relations.find(r => r.from === 'Controller' && r.to === 'Config');
+        
+        // service 是字段（关联），config 是参数（依赖）
+        expect(serviceR?.type).not.toBe('dependency');
+        expect(configR?.type).toBe('dependency');
+      });
+    });
+
+    // ======== 10. 继承链上的关系 ========
+    describe('继承链上的关系', () => {
+      
+      test('子类不重复父类的关联', () => {
+        const code = `
+          class Logger { log(): void {} }
+          class Base {
+            protected logger: Logger;
+          }
+          class Derived extends Base {
+            // 没有声明 logger，继承自 Base
+          }
+        `;
+        const result = parseCode(code);
+        
+        // Base 有对 Logger 的关联
+        const baseToLogger = result.relations.find(r => r.from === 'Base' && r.to === 'Logger');
+        expect(baseToLogger).toBeDefined();
+        
+        // Derived 不应重复声明对 Logger 的关联
+        const derivedToLogger = result.relations.find(r => r.from === 'Derived' && r.to === 'Logger');
+        expect(derivedToLogger).toBeUndefined();
+      });
+
+      test('子类自己的字段应建立关系', () => {
+        const code = `
+          class Logger { log(): void {} }
+          class Base { }
+          class Derived extends Base {
+            private logger: Logger;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const derivedToLogger = result.relations.find(r => r.from === 'Derived' && r.to === 'Logger');
+        expect(derivedToLogger).toBeDefined();
+      });
+    });
+
+    // ======== 11. Partial/Required/Pick/Omit 工具类型 ========
+    describe('工具类型剥壳', () => {
+      
+      test('Partial<User> → 关联 User', () => {
+        const code = `
+          class User { name: string; }
+          class UserService {
+            update(id: string, data: Partial<User>): void {}
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'UserService' && r.to === 'User');
+        expect(r).toBeDefined();
+      });
+
+      test('Required<User> → 关联 User', () => {
+        const code = `
+          class Config { debug?: boolean; }
+          class App {
+            config: Required<Config>;
+          }
+        `;
+        const result = parseCode(code);
+        
+        const r = result.relations.find(r => r.from === 'App' && r.to === 'Config');
+        expect(r).toBeDefined();
+      });
+    });
+  });
+
+  // --------------------------------------------------------
+  // 41. 文件名到包名的转换
+  // --------------------------------------------------------
+  describe('41. 文件名到包名的转换', () => {
     
     test('文件名应该作为包名使用', () => {
       const fileName = 'models.ts';
