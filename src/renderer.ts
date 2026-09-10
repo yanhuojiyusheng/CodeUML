@@ -192,26 +192,28 @@ function renderBox(b: Box): string {
   return svg;
 }
 
-function renderPackage(pkg: PackageBox): string {
-  const colors = ['#e3f2fd', '#fce4ec', '#e8f5e9', '#fff3e0', '#f3e5f5', '#e0f2f1', '#fff8e1'];
-  const colorIndex = Math.abs(hashString(pkg.name)) % colors.length;
-  const bgColor = colors[colorIndex];
-  
-  let svg = `<g class="package-box">`;
-  svg += `<rect x="${pkg.x}" y="${pkg.y}" width="${pkg.w}" height="${pkg.h}" fill="${bgColor}" stroke="#90a4ae" stroke-width="1.5" rx="4" stroke-dasharray="6,3"/>`;
-  svg += `<text x="${pkg.x + 8}" y="${pkg.y + 14}" fill="#546e7a" font-size="12" font-weight="bold">📦 ${esc(pkg.name)}</text>`;
-  svg += `</g>`;
-  return svg;
+/**
+ * 为包生成互不相同的颜色。
+ * 按包总数均匀分布色相，保证不同包颜色不同；包数量很多时也不会发生碰撞。
+ */
+function getPackageColor(index: number, total: number): { bg: string; border: string; text: string } {
+  const hue = (index * 360) / Math.max(total, 1);
+  const h = hue.toFixed(1);
+  return {
+    bg: `hsl(${h}, 72%, 90%)`,
+    border: `hsl(${h}, 42%, 58%)`,
+    text: `hsl(${h}, 45%, 30%)`,
+  };
 }
 
-function hashString(s: string): number {
-  let hash = 0;
-  for (let i = 0; i < s.length; i++) {
-    const char = s.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return hash;
+function renderPackage(pkg: PackageBox, index: number, total: number): string {
+  const { bg, border, text } = getPackageColor(index, total);
+  
+  let svg = `<g class="package-box">`;
+  svg += `<rect x="${pkg.x}" y="${pkg.y}" width="${pkg.w}" height="${pkg.h}" fill="${bg}" stroke="${border}" stroke-width="1.5" rx="4" stroke-dasharray="6,3"/>`;
+  svg += `<text x="${pkg.x + 8}" y="${pkg.y + 14}" fill="${text}" font-size="12" font-weight="bold">📦 ${esc(pkg.name)}</text>`;
+  svg += `</g>`;
+  return svg;
 }
 
 export function renderSVG(diagram: Diagram): string {
@@ -221,8 +223,13 @@ export function renderSVG(diagram: Diagram): string {
   let svg = '';
 
   // 1) 先画包背景
+  // 按包名排序后分配稳定索引，保证配色与绘制顺序无关且互不重复
+  const sortedPackageNames = packages.map(p => p.name).sort();
+  const packageColorIndex = new Map<string, number>();
+  sortedPackageNames.forEach((name, i) => packageColorIndex.set(name, i));
   packages.forEach(pkg => {
-    svg += renderPackage(pkg);
+    const index = packageColorIndex.get(pkg.name) ?? 0;
+    svg += renderPackage(pkg, index, packages.length);
   });
 
   // 2) 再画类框
