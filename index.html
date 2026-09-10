@@ -65,14 +65,34 @@ textarea{width:100%;height:100%;background:#1e1e1e;color:#d4d4d4;border:none;pad
 .class-box .sep{stroke:#999;stroke-width:1}
 #diagram-view svg{user-select:none}
 #diagram-view .relation{cursor:pointer}
+#diagram-view .class-box{cursor:pointer}
+/* 双击线：橙色高亮，强弱决定粗细/透明度 */
 #diagram-view .relation.highlighted line:not(.hit),
 #diagram-view .relation.highlighted polygon,
-#diagram-view .relation.highlighted path{stroke:#ff6b00;stroke-width:3}
+#diagram-view .relation.highlighted path{stroke:#ff6b00;stroke-width:calc(var(--hl-width,3) * 1px);opacity:var(--hl-opacity,1)}
 #diagram-view .relation.highlighted polygon{fill:#ffd9b3}
 #diagram-view .relation.highlighted text{fill:#e65100;font-weight:bold}
 #diagram-view .relation.highlighted{filter:drop-shadow(0 0 3px rgba(255,107,0,0.75))}
+/* 单击类：连入的蓝色、发出的橙色（发出规则在后，自环时橙色优先） */
+#diagram-view .relation.incoming line:not(.hit),
+#diagram-view .relation.incoming polygon,
+#diagram-view .relation.incoming path{stroke:#1e88e5;stroke-width:calc(var(--hl-width,3) * 1px);opacity:var(--hl-opacity,1)}
+#diagram-view .relation.incoming polygon{fill:#bbdefb}
+#diagram-view .relation.incoming text{fill:#0d47a1;font-weight:bold}
+#diagram-view .relation.outgoing line:not(.hit),
+#diagram-view .relation.outgoing polygon,
+#diagram-view .relation.outgoing path{stroke:#ff6b00;stroke-width:calc(var(--hl-width,3) * 1px);opacity:var(--hl-opacity,1)}
+#diagram-view .relation.outgoing polygon{fill:#ffd9b3}
+#diagram-view .relation.outgoing text{fill:#e65100;font-weight:bold}
+/* 类框高亮 */
 #diagram-view .class-box.highlighted rect{stroke:#ff6b00;stroke-width:2.5;fill:#fff7e6}
 #diagram-view .class-box.highlighted{filter:drop-shadow(0 0 4px rgba(255,107,0,0.6))}
+#diagram-view .class-box.incoming rect{stroke:#1e88e5;stroke-width:2.5;fill:#e8f2fd}
+#diagram-view .class-box.incoming{filter:drop-shadow(0 0 4px rgba(30,136,229,0.6))}
+#diagram-view .class-box.outgoing rect{stroke:#ff6b00;stroke-width:2.5;fill:#fff7e6}
+#diagram-view .class-box.outgoing{filter:drop-shadow(0 0 4px rgba(255,107,0,0.6))}
+#diagram-view .class-box.selected rect{stroke:#333;stroke-width:3;fill:#fff}
+#diagram-view .class-box.selected{filter:drop-shadow(0 0 6px rgba(0,0,0,0.4))}
 </style>
 </head>
 <body>
