@@ -48,6 +48,11 @@ export function textWidth(s: string): number {
   return String(s).length * LAYOUT.CHAR_W + 16;
 }
 
+/** 生成关系的唯一标识（用于高亮等场景） */
+export function relationKey(r: { from: string; type: string; to: string }): string {
+  return `${r.from}|${r.type}|${r.to}`;
+}
+
 /** 安全获取 DOM 元素 */
 export function getElement<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);

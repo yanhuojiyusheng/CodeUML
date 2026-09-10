@@ -7,7 +7,7 @@ import { renderSVG, setDisplayConfig } from './renderer';
 import { generateDrawioXML } from './exporter';
 import { ParsedData, RelationType } from './types';
 import { formatParsed, formatMergedPlantUML } from './plantuml';
-import { getElement } from './utils';
+import { getElement, relationKey } from './utils';
 
 // DOM 元素
 const codeEl = getElement<HTMLTextAreaElement>('code');
@@ -44,6 +44,50 @@ const RELATION_MODES = [
 ] as const;
 
 let relationMode = 0;
+
+// 当前高亮的关系（双击连接线时设置）
+let highlightedRelationKey: string | null = null;
+
+/** 将高亮状态应用到已渲染的 SVG（关系线 + 两端类框） */
+function applyHighlight() {
+  let fromName = '';
+  let toName = '';
+  
+  diagramEl.querySelectorAll<SVGGElement>('g.relation').forEach(g => {
+    const isHighlighted = g.dataset.key === highlightedRelationKey;
+    g.classList.toggle('highlighted', isHighlighted);
+    if (isHighlighted) {
+      fromName = g.dataset.from || '';
+      toName = g.dataset.to || '';
+    }
+  });
+  
+  diagramEl.querySelectorAll<SVGGElement>('g.class-box').forEach(b => {
+    const name = b.dataset.name || '';
+    const isHighlighted = highlightedRelationKey != null && (name === fromName || name === toName);
+    b.classList.toggle('highlighted', isHighlighted);
+  });
+}
+
+// 双击连接线 -> 高亮整条线
+diagramEl.addEventListener('dblclick', (e) => {
+  const target = e.target as Element | null;
+  const relationEl = target?.closest?.('.relation') as SVGGElement | null;
+  if (!relationEl) return;
+  highlightedRelationKey = relationEl.dataset.key ?? null;
+  applyHighlight();
+});
+
+// 单击其他线或空白 -> 取消高亮；单击已高亮的线保持不变
+diagramEl.addEventListener('click', (e) => {
+  const target = e.target as Element | null;
+  const relationEl = target?.closest?.('.relation') as SVGGElement | null;
+  if (relationEl && relationEl.dataset.key === highlightedRelationKey) return;
+  if (highlightedRelationKey) {
+    highlightedRelationKey = null;
+    applyHighlight();
+  }
+});
 
 /** 按显示模式过滤关系/连线 */
 function filterRelationsByMode<T extends { type: RelationType }>(items: T[], mode: number): T[] {
@@ -553,7 +597,12 @@ function updateAll() {
     
     // 图表显示按当前关系模式过滤，XML/PlantUML 保留全量
     const displayDiagram = { ...diagram, lines: filterRelationsByMode(diagram.lines, relationMode) };
-    diagramEl.innerHTML = renderSVG(displayDiagram);
+    diagramEl.innerHTML = renderSVG(displayDiagram, highlightedRelationKey);
+    // 若高亮的关系在当前可见集合中已不存在，则清除高亮
+    if (highlightedRelationKey && !displayDiagram.lines.some(l => relationKey(l) === highlightedRelationKey)) {
+      highlightedRelationKey = null;
+    }
+    applyHighlight();
     xmlOutputEl.value = generateDrawioXML(diagram);
     parsedOutputEl.value = formatMergedPlantUML(allParsed, classPackageMap);
     
@@ -579,7 +628,11 @@ function updateSingle() {
     tab.parsed = parsed;
     
     const diagram = layoutDiagram(parsed);
-    diagramEl.innerHTML = renderSVG(diagram);
+    diagramEl.innerHTML = renderSVG(diagram, highlightedRelationKey);
+    if (highlightedRelationKey && !diagram.lines.some(l => relationKey(l) === highlightedRelationKey)) {
+      highlightedRelationKey = null;
+    }
+    applyHighlight();
     xmlOutputEl.value = generateDrawioXML(diagram);
     parsedOutputEl.value = formatParsed(parsed, tab.name);
     

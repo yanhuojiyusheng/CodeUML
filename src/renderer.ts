@@ -1,7 +1,7 @@
 /** SVG 渲染器 - 支持包分组和成员筛选 */
 
 import { Box, Diagram, Line, Member, PackageBox } from './types';
-import { esc, memberText, LAYOUT } from './utils';
+import { esc, memberText, LAYOUT, relationKey } from './utils';
 
 const { ARROW } = LAYOUT;
 
@@ -57,7 +57,7 @@ function filterProperties(props: Member[], maxCount: number): { filtered: Member
   return { filtered: combined, hasMore: props.length > maxCount };
 }
 
-function renderRelation(r: Line): string {
+function renderRelation(r: Line, highlightKey?: string | null): string {
   const dx = r.tx - r.fx, dy = r.ty - r.fy;
   const len = Math.sqrt(dx * dx + dy * dy) || 1;
   const ux = dx / len, uy = dy / len;
@@ -67,6 +67,9 @@ function renderRelation(r: Line): string {
   const dashed = r.type === 'implements' || r.type === 'dependency' ? ' stroke-dasharray="8,4"' : '';
 
   let svg = '';
+
+  // 透明加粗命中线，方便双击选中整条关系
+  svg += `<line class="hit" x1="${r.fx}" y1="${r.fy}" x2="${r.tx}" y2="${r.ty}" stroke="transparent" stroke-width="12" fill="none" pointer-events="stroke"/>`;
 
   switch (r.type) {
     case 'extends': {
@@ -119,7 +122,9 @@ function renderRelation(r: Line): string {
     svg += `<text x="${labelX}" y="${labelY}" fill="#666" font-size="10" text-anchor="middle">${esc(r.toMultiplicity)}</text>`;
   }
 
-  return svg;
+  const key = relationKey(r);
+  const highlighted = highlightKey != null && key === highlightKey;
+  return `<g class="relation${highlighted ? ' highlighted' : ''}" data-key="${esc(key)}" data-from="${esc(r.from)}" data-to="${esc(r.to)}">${svg}</g>`;
 }
 
 /** 截断文本，超长显示... */
@@ -132,7 +137,7 @@ function truncateText(text: string, maxWidth: number, fontSize: number = 12): st
   return esc(text.substring(0, maxChars - 3)) + '...';
 }
 
-function renderBox(b: Box): string {
+function renderBox(b: Box, highlighted = false): string {
   const LH = LAYOUT.LINE_H;
   const SEP = 1;
   
@@ -143,7 +148,7 @@ function renderBox(b: Box): string {
   const propsH = (filteredProps.length + (hasMoreProps ? 1 : 0)) * LH || LH;
   const methsH = (filteredMeths.length + (hasMoreMeths ? 1 : 0)) * LH || LH;
 
-  let svg = `<g class="class-box" transform="translate(${b.x},${b.y})">`;
+  let svg = `<g class="class-box${highlighted ? ' highlighted' : ''}" data-name="${esc(b.name)}" transform="translate(${b.x},${b.y})">`;
   svg += `<rect width="${b.w}" height="${b.h}" fill="#fff" stroke="#333" stroke-width="1.5" rx="2"/>`;
 
   let y = 0;
@@ -216,7 +221,7 @@ function renderPackage(pkg: PackageBox, index: number, total: number): string {
   return svg;
 }
 
-export function renderSVG(diagram: Diagram): string {
+export function renderSVG(diagram: Diagram, highlightKey?: string | null): string {
   const { boxes, lines, packages, width, height } = diagram;
   if (!boxes.length) return '<text x="10" y="30" fill="#999">无有效类/接口定义</text>';
 
@@ -232,14 +237,22 @@ export function renderSVG(diagram: Diagram): string {
     svg += renderPackage(pkg, index, packages.length);
   });
 
-  // 2) 再画类框
+  // 2) 再画类框（高亮关系两端时同步高亮起点/终点类）
+  const highlightNames = new Set<string>();
+  if (highlightKey) {
+    const hl = lines.find(l => relationKey(l) === highlightKey);
+    if (hl) {
+      highlightNames.add(hl.from);
+      highlightNames.add(hl.to);
+    }
+  }
   boxes.forEach(b => {
-    svg += renderBox(b);
+    svg += renderBox(b, highlightNames.has(b.name));
   });
 
   // 3) 最后画关系线（在最上层）
   lines.forEach(r => {
-    svg += renderRelation(r);
+    svg += renderRelation(r, highlightKey);
   });
 
   return `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif" font-size="12">${svg}</svg>`;
