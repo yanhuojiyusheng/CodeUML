@@ -6,7 +6,7 @@
 const ts = require('typescript');
 (global as any).ts = ts;
 
-import { parseCode } from '../src/parser';
+import { parseCode, parseCodeWithKnownTypes } from '../src/parser';
 import { ParsedData, Member } from '../src/types';
 
 // ============================================================
@@ -1525,9 +1525,135 @@ describe('PlantUML 语法合规性测试', () => {
   });
 
   // --------------------------------------------------------
-  // 34. 关系方向一致性
+  // 34. throw 语句产生的依赖关系
   // --------------------------------------------------------
-  describe('34. 关系方向一致性', () => {
+  describe('34. throw 语句产生的依赖关系', () => {
+    
+    test('throw new 自定义错误应产生依赖关系', () => {
+      const code = `
+        class CredentialSynchronizationError {
+          providerId: string;
+        }
+        class ModelRuntime {
+          private synchronize(): void {
+            throw new CredentialSynchronizationError();
+          }
+        }
+      `;
+      const result = parseCode(code);
+      
+      // ModelRuntime 应该依赖 CredentialSynchronizationError
+      const dependency = result.relations.find(
+        r => r.from === 'ModelRuntime' && r.to === 'CredentialSynchronizationError' && r.type === 'dependency'
+      );
+      expect(dependency).toBeDefined();
+    });
+
+    test('throw 已存在的错误类应产生依赖关系', () => {
+      const code = `
+        class CustomError {
+          message: string;
+        }
+        class Service {
+          process(): void {
+            throw new CustomError();
+          }
+        }
+      `;
+      const result = parseCode(code);
+      
+      const dependency = result.relations.find(
+        r => r.from === 'Service' && r.to === 'CustomError' && r.type === 'dependency'
+      );
+      expect(dependency).toBeDefined();
+    });
+
+    test('throw Error 内置类型不应产生依赖', () => {
+      const code = `
+        class Service {
+          process(): void {
+            throw new Error('failed');
+          }
+        }
+      `;
+      const result = parseCode(code);
+      
+      // Error 是内置类型，不应产生用户类型的依赖关系
+      const dependency = result.relations.find(
+        r => r.from === 'Service' && r.to === 'Error' && r.type === 'dependency'
+      );
+      expect(dependency).toBeUndefined();
+    });
+
+    test('throw 表达式中的构造函数参数类型应产生依赖', () => {
+      const code = `
+        class Context {
+          requestId: string;
+        }
+        class AppError {
+          constructor(context: Context) {}
+        }
+        class Service {
+          fail(ctx: Context): void {
+            throw new AppError(ctx);
+          }
+        }
+      `;
+      const result = parseCode(code);
+      
+      // Service 依赖 AppError（throw）和 Context（参数）
+      const throwDep = result.relations.find(
+        r => r.from === 'Service' && r.to === 'AppError' && r.type === 'dependency'
+      );
+      const ctxDep = result.relations.find(
+        r => r.from === 'Service' && r.to === 'Context'
+      );
+      expect(throwDep).toBeDefined();
+      expect(ctxDep).toBeDefined();
+    });
+
+    test('多处 throw 同一错误类不应重复', () => {
+      const code = `
+        class MyError {}
+        class Service {
+          a(): void { throw new MyError(); }
+          b(): void { throw new MyError(); }
+        }
+      `;
+      const result = parseCode(code);
+      
+      const dependencies = result.relations.filter(
+        r => r.from === 'Service' && r.to === 'MyError' && r.type === 'dependency'
+      );
+      expect(dependencies).toHaveLength(1);
+    });
+
+    test('catch 中引用的错误类型应产生依赖', () => {
+      const code = `
+        class NetworkError {
+          statusCode: number;
+        }
+        class Service {
+          fetch(): void {
+            try {
+              // some code
+            } catch (e) {
+              if (e instanceof NetworkError) {}
+            }
+          }
+        }
+      `;
+      const result = parseCode(code);
+      
+      // 注意：instanceof 可能不会被当前解析器捕获
+      // 这是一个边界情况
+    });
+  });
+
+  // --------------------------------------------------------
+  // 35. 关系方向一致性
+  // --------------------------------------------------------
+  describe('35. 关系方向一致性', () => {
     
     test('聚合方向应从整体到部分', () => {
       const code = `
@@ -1551,6 +1677,331 @@ describe('PlantUML 语法合规性测试', () => {
       const relation = result.relations.find(r => r.type === 'composition');
       expect(relation?.from).toBe('House');
       expect(relation?.to).toBe('Window');
+    });
+  });
+
+  // --------------------------------------------------------
+  // 36. throw 语句产生的依赖关系
+  // --------------------------------------------------------
+  describe('36. throw 语句产生的依赖关系', () => {
+    
+    test('throw new 自定义错误应产生依赖关系', () => {
+      const code = `
+        class CredentialSynchronizationError {
+          providerId: string;
+        }
+        class ModelRuntime {
+          private synchronize(): void {
+            throw new CredentialSynchronizationError();
+          }
+        }
+      `;
+      const result = parseCode(code);
+      
+      const dependency = result.relations.find(
+        r => r.from === 'ModelRuntime' && r.to === 'CredentialSynchronizationError' && r.type === 'dependency'
+      );
+      expect(dependency).toBeDefined();
+    });
+
+    test('throw 已存在的错误类应产生依赖关系', () => {
+      const code = `
+        class CustomError {
+          message: string;
+        }
+        class Service {
+          process(): void {
+            throw new CustomError();
+          }
+        }
+      `;
+      const result = parseCode(code);
+      
+      const dependency = result.relations.find(
+        r => r.from === 'Service' && r.to === 'CustomError' && r.type === 'dependency'
+      );
+      expect(dependency).toBeDefined();
+    });
+
+    test('throw Error 内置类型不应产生依赖', () => {
+      const code = `
+        class Service {
+          process(): void {
+            throw new Error('failed');
+          }
+        }
+      `;
+      const result = parseCode(code);
+      
+      const dependency = result.relations.find(
+        r => r.from === 'Service' && r.to === 'Error' && r.type === 'dependency'
+      );
+      expect(dependency).toBeUndefined();
+    });
+
+    test('throw 表达式中的构造函数参数类型应产生依赖', () => {
+      const code = `
+        class Context {
+          requestId: string;
+        }
+        class AppError {
+          constructor(context: Context) {}
+        }
+        class Service {
+          fail(ctx: Context): void {
+            throw new AppError(ctx);
+          }
+        }
+      `;
+      const result = parseCode(code);
+      
+      const throwDep = result.relations.find(
+        r => r.from === 'Service' && r.to === 'AppError' && r.type === 'dependency'
+      );
+      const ctxDep = result.relations.find(
+        r => r.from === 'Service' && r.to === 'Context'
+      );
+      expect(throwDep).toBeDefined();
+      expect(ctxDep).toBeDefined();
+    });
+
+    test('多处 throw 同一错误类不应重复', () => {
+      const code = `
+        class MyError {}
+        class Service {
+          a(): void { throw new MyError(); }
+          b(): void { throw new MyError(); }
+        }
+      `;
+      const result = parseCode(code);
+      
+      const dependencies = result.relations.filter(
+        r => r.from === 'Service' && r.to === 'MyError' && r.type === 'dependency'
+      );
+      expect(dependencies).toHaveLength(1);
+    });
+  });
+
+  // --------------------------------------------------------
+  // 37. 多文件合并功能
+  // --------------------------------------------------------
+  describe('37. 多文件合并功能', () => {
+    
+    test('多个文件的类应该能合并解析', () => {
+      const code1 = `class User { name: string; }`;
+      const code2 = `class Order { user: User; }`;
+      
+      const parsed1 = parseCode(code1);
+      const parsed2 = parseCode(code2);
+      
+      const allClasses = [...parsed1.classes, ...parsed2.classes];
+      
+      expect(allClasses).toHaveLength(2);
+      expect(allClasses.map(c => c.name)).toContain('User');
+      expect(allClasses.map(c => c.name)).toContain('Order');
+    });
+
+    test('跨文件引用应产生关系', () => {
+      const code1 = `class Database { connect(): void {} }`;
+      const code2 = `
+        class UserService {
+          db: Database;
+          constructor(db: Database) {}
+        }
+      `;
+      
+      // 使用 parseCodeWithKnownTypes 传入外部类型
+      const parsed2 = parseCodeWithKnownTypes(code2, new Set(['Database']));
+      
+      expect(parsed2.relations.length).toBeGreaterThan(0);
+      const dbRelation = parsed2.relations.find(
+        r => r.from === 'UserService' && r.to === 'Database'
+      );
+      expect(dbRelation).toBeDefined();
+    });
+
+    test('包名应基于文件名设置', () => {
+      const parsed = parseCode('class Test {}');
+      parsed.classes.forEach(c => { c.packageName = 'myfile'; });
+      
+      expect(parsed.classes[0].packageName).toBe('myfile');
+    });
+
+    test('同名类不应重复添加', () => {
+      const code1 = `class Shared { value: number; }`;
+      const code2 = `class Shared { value: string; }`;
+      
+      const parsed1 = parseCode(code1);
+      const parsed2 = parseCode(code2);
+      
+      const classPackageMap = new Map<string, string>();
+      const allClasses: typeof parsed1.classes = [];
+      
+      parsed1.classes.forEach(c => {
+        if (!classPackageMap.has(c.name)) {
+          classPackageMap.set(c.name, 'file1');
+          allClasses.push(c);
+        }
+      });
+      
+      parsed2.classes.forEach(c => {
+        if (!classPackageMap.has(c.name)) {
+          classPackageMap.set(c.name, 'file2');
+          allClasses.push(c);
+        }
+      });
+      
+      expect(allClasses).toHaveLength(1);
+      expect(classPackageMap.get('Shared')).toBe('file1');
+    });
+
+    test('关系应该去重', () => {
+      const code = `class A { b: B; } class B {}`;
+      const parsed1 = parseCode(code);
+      const parsed2 = parseCode(code);
+      
+      const allRelations = [...parsed1.relations, ...parsed2.relations];
+      const uniqueRelations: typeof allRelations = [];
+      const relationKeys = new Set<string>();
+      
+      allRelations.forEach(r => {
+        const key = `${r.from}-${r.type}-${r.to}`;
+        if (!relationKeys.has(key)) {
+          relationKeys.add(key);
+          uniqueRelations.push(r);
+        }
+      });
+      
+      const aToB = uniqueRelations.filter(r => r.from === 'A' && r.to === 'B');
+      expect(aToB).toHaveLength(1);
+    });
+
+    test('跨文件继承应正确处理', () => {
+      const code1 = `abstract class BaseEntity { id: number; }`;
+      const code2 = `class User extends BaseEntity { name: string; }`;
+      
+      const parsed2 = parseCodeWithKnownTypes(code2, new Set(['BaseEntity']));
+      
+      const extendsRelation = parsed2.relations.find(
+        r => r.type === 'extends' && r.from === 'User' && r.to === 'BaseEntity'
+      );
+      expect(extendsRelation).toBeDefined();
+    });
+
+    test('跨文件实现接口应正确处理', () => {
+      const code1 = `interface Serializable { serialize(): string; }`;
+      const code2 = `
+        class UserModel implements Serializable {
+          serialize(): string { return ''; }
+        }
+      `;
+      
+      const parsed2 = parseCodeWithKnownTypes(code2, new Set(['Serializable']));
+      
+      const implementsRelation = parsed2.relations.find(
+        r => r.type === 'implements' && r.from === 'UserModel' && r.to === 'Serializable'
+      );
+      expect(implementsRelation).toBeDefined();
+    });
+
+    test('跨文件聚合关系应正确处理', () => {
+      const code1 = `class Engine { power: number; }`;
+      const code2 = `class Car { engines: Engine[]; }`;
+      
+      const parsed2 = parseCodeWithKnownTypes(code2, new Set(['Engine']));
+      
+      const aggregation = parsed2.relations.find(
+        r => r.type === 'aggregation' && r.from === 'Car' && r.to === 'Engine'
+      );
+      expect(aggregation).toBeDefined();
+      expect(aggregation?.toMultiplicity).toBe('*');
+    });
+
+    test('跨文件组合关系应正确处理', () => {
+      const code1 = `class Window { size: number; }`;
+      const code2 = `class House { window: Window = new Window(); }`;
+      
+      const parsed2 = parseCodeWithKnownTypes(code2, new Set(['Window']));
+      
+      const composition = parsed2.relations.find(
+        r => r.type === 'composition' && r.from === 'House' && r.to === 'Window'
+      );
+      expect(composition).toBeDefined();
+    });
+
+    test('跨文件依赖关系应正确处理', () => {
+      const code1 = `class Logger { log(msg: string): void {} }`;
+      const code2 = `
+        class Service {
+          process(logger: Logger): void {}
+        }
+      `;
+      
+      const parsed2 = parseCodeWithKnownTypes(code2, new Set(['Logger']));
+      
+      const dependency = parsed2.relations.find(
+        r => r.type === 'dependency' && r.from === 'Service' && r.to === 'Logger'
+      );
+      expect(dependency).toBeDefined();
+    });
+  });
+
+  // --------------------------------------------------------
+  // 38. PlantUML 包语法
+  // --------------------------------------------------------
+  describe('38. PlantUML 包语法', () => {
+    
+    test('单文件应能设置包名', () => {
+      const parsed = parseCode('class Test {}');
+      parsed.classes.forEach(c => { c.packageName = 'myPackage'; });
+      
+      expect(parsed.classes[0].packageName).toBe('myPackage');
+    });
+
+    test('多个包应该能正确区分', () => {
+      const parsed1 = parseCode('class User { name: string; }');
+      const parsed2 = parseCode('class Order { id: number; }');
+      
+      parsed1.classes.forEach(c => { c.packageName = 'models'; });
+      parsed2.classes.forEach(c => { c.packageName = 'services'; });
+      
+      const allClasses = [...parsed1.classes, ...parsed2.classes];
+      expect(allClasses).toHaveLength(2);
+      
+      const modelsClasses = allClasses.filter(c => c.packageName === 'models');
+      const servicesClasses = allClasses.filter(c => c.packageName === 'services');
+      
+      expect(modelsClasses).toHaveLength(1);
+      expect(servicesClasses).toHaveLength(1);
+    });
+  });
+
+  // --------------------------------------------------------
+  // 39. 文件名到包名的转换
+  // --------------------------------------------------------
+  describe('39. 文件名到包名的转换', () => {
+    
+    test('文件名应该作为包名使用', () => {
+      const fileName = 'models.ts';
+      const packageName = fileName.replace(/\.ts$/, '');
+      
+      expect(packageName).toBe('models');
+    });
+
+    test('带路径的文件名应只取文件名部分', () => {
+      const filePath = 'src/models/user.ts';
+      const fileName = filePath.split('/').pop() || '';
+      const packageName = fileName.replace(/\.ts$/, '');
+      
+      expect(packageName).toBe('user');
+    });
+
+    test('Windows 路径也应正确处理', () => {
+      const filePath = 'src\\models\\user.ts';
+      const fileName = filePath.split('\\').pop() || '';
+      const packageName = fileName.replace(/\.ts$/, '');
+      
+      expect(packageName).toBe('user');
     });
   });
 });

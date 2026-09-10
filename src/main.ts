@@ -1,6 +1,6 @@
 /** 主入口 */
 
-import { parseCode } from './parser';
+import { parseCode, parseCodeWithKnownTypes } from './parser';
 import { layoutDiagram } from './layout';
 import { renderSVG } from './renderer';
 import { generateDrawioXML } from './exporter';
@@ -293,20 +293,30 @@ function escHtml(s: string): string {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** 合并所有文件的解析结果 */
+/** 合并所有文件的解析结果（跨文件类型感知） */
 function mergeAllParsed(): Map<string, ParsedData> {
-  const results = new Map<string, ParsedData>();
-  
   // 先解析当前标签的内容
   if (activeTabId) {
     const currentTab = tabs.find(t => t.id === activeTabId);
     if (currentTab) currentTab.content = codeEl.value;
   }
   
-  // 解析所有标签，并设置包名
+  // 第一步：收集所有文件的类型名称
+  const allTypeNames = new Set<string>();
   tabs.forEach(tab => {
     try {
       const parsed = parseCode(tab.content);
+      parsed.classes.forEach(c => allTypeNames.add(c.name));
+    } catch (e) {
+      // 忽略解析错误，继续收集
+    }
+  });
+  
+  // 第二步：使用合并的类型集合重新解析每个文件
+  const results = new Map<string, ParsedData>();
+  tabs.forEach(tab => {
+    try {
+      const parsed = parseCodeWithKnownTypes(tab.content, allTypeNames);
       // 设置包名
       parsed.classes.forEach(c => {
         c.packageName = tab.name;

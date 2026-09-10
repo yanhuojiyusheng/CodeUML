@@ -135,12 +135,17 @@ function extractTypesFromParams(params: string, knownTypes: Set<string>): Set<st
 }
 
 export function parseCode(code: string): ParsedData {
+  return parseCodeWithKnownTypes(code, new Set());
+}
+
+/** 带预设类型的解析（用于跨文件） */
+export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>): ParsedData {
   const sf = ts.createSourceFile('input.ts', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const classes: ClassInfo[] = [];
   const relations: Relation[] = [];
-  const knownTypes = new Set<string>();
+  const knownTypes = new Set<string>(externalTypes); // 包含外部类型
 
-  // 第一遍：收集所有类型名称
+  // 第一遍：收集本文件类型名称
   ts.forEachChild(sf, (node: any) => {
     if (ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node) || 
         ts.isEnumDeclaration(node)) {
@@ -479,6 +484,27 @@ export function parseCode(code: string): ParsedData {
               returnType !== node.name.text && !propertyTypes.has(returnType)) {
             dependencyTypes.add(returnType);
           }
+        }
+        
+        // throw new ClassName() 也会产生依赖
+        if (ts.isMethodDeclaration(m) || ts.isConstructorDeclaration(m)) {
+          const visitNode = (node: any) => {
+            if (ts.isThrowStatement(node) && node.expression) {
+              if (ts.isNewExpression(node.expression)) {
+                const expr = node.expression.expression;
+                // 增加空值检查，只处理简单标识符（如 new Error()）
+                if (expr && ts.isIdentifier(expr)) {
+                  const errorTypeName = expr.text;
+                  if (errorTypeName && isUserType(errorTypeName, knownTypes) && 
+                      errorTypeName !== node.name?.text && !propertyTypes.has(errorTypeName)) {
+                    dependencyTypes.add(errorTypeName);
+                  }
+                }
+              }
+            }
+            ts.forEachChild(node, visitNode);
+          };
+          ts.forEachChild(m, visitNode);
         }
       });
       
