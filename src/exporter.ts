@@ -1,10 +1,7 @@
 /** Draw.io XML 导出器 */
 
-import { Box, Diagram, Line, DrawioCell } from './types';
-
-function esc(s: string): string {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+import { Box, Diagram, DrawioCell } from './types';
+import { esc, LAYOUT } from './utils';
 
 function getDrawioArrowStyle(type: string): string {
   switch (type) {
@@ -28,9 +25,7 @@ function buildBoxLabel(b: Box): string {
   const titleText = b.lines.find(l => l.cls === 'title');
 
   let label = '';
-  titleLines.forEach(l => {
-    label += `<p><i>${esc(l.text)}</i></p>`;
-  });
+  titleLines.forEach(l => { label += `<p><i>${esc(l.text)}</i></p>`; });
   label += `<p><b>${esc(titleText?.text || '')}</b></p>`;
   label += '<hr size="1"/>';
 
@@ -49,8 +44,7 @@ function buildBoxLabel(b: Box): string {
 
 export function generateDrawioXML(diagram: Diagram): string {
   const { boxes, lines } = diagram;
-  const SCALE = 1.5;
-  const PAD = 40;
+  const { SCALE, PAD } = LAYOUT.EXPORTER;
 
   let cells: DrawioCell[] = [];
   let id = 1;
@@ -80,24 +74,15 @@ export function generateDrawioXML(diagram: Diagram): string {
     const fromId = boxes.indexOf(from) + 1;
     const toId = boxes.indexOf(to) + 1;
 
-    let style = getDrawioArrowStyle(r.type);
-    
-    // 添加多重性标签
     let label = '';
-    if (r.fromMultiplicity && r.fromMultiplicity !== '1') {
-      label = r.fromMultiplicity;
-    }
-    if (r.toMultiplicity && r.toMultiplicity !== '1') {
-      label = (label ? label + '..' : '') + r.toMultiplicity;
-    }
-    if (r.label) {
-      label = label ? r.label + ' ' + label : r.label;
-    }
+    if (r.fromMultiplicity && r.fromMultiplicity !== '1') label = r.fromMultiplicity;
+    if (r.toMultiplicity && r.toMultiplicity !== '1') label = (label ? label + '..' : '') + r.toMultiplicity;
+    if (r.label) label = label ? r.label + ' ' + label : r.label;
 
     cells.push({
       id,
       value: label,
-      style,
+      style: getDrawioArrowStyle(r.type),
       edge: 1,
       source: fromId,
       target: toId

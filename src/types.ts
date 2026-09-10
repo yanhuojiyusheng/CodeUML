@@ -6,13 +6,17 @@ export interface Member {
   name: string;
   type: string;
   params?: string;
+  isStatic?: boolean;
+  isAbstract?: boolean;
 }
 
 export interface ClassInfo {
   name: string;
   isInterface: boolean;
   isAbstract: boolean;
+  isEnum: boolean;
   members: Member[];
+  packageName?: string; // 所属包名
 }
 
 export type RelationType = 'extends' | 'implements' | 'association' | 'aggregation' | 'composition' | 'dependency';
@@ -21,9 +25,9 @@ export interface Relation {
   from: string;
   to: string;
   type: RelationType;
-  label?: string;        // 关联名称
-  fromMultiplicity?: string; // 源端多重性
-  toMultiplicity?: string;   // 目标端多重性
+  label?: string;
+  fromMultiplicity?: string;
+  toMultiplicity?: string;
 }
 
 export interface ParsedData {
@@ -48,9 +52,19 @@ export interface Line extends Relation {
   ty: number;
 }
 
+export interface PackageBox {
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  boxes: Box[];
+}
+
 export interface Diagram {
   boxes: Box[];
   lines: Line[];
+  packages: PackageBox[]; // 新增：包框
   width: number;
   height: number;
 }

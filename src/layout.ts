@@ -1,28 +1,13 @@
-/** 布局引擎 - 改进的层级布局 */
+/** 布局引擎 - 支持包分组和优化布局 */
 
-import { ParsedData, Box, Line, Diagram, Member } from './types';
-
-const PAD_X = 140;
-const PAD_Y = 180;
-const LINE_H = 18;
-const CHAR_W = 7.2;
-
-function textWidth(s: string): number {
-  return String(s).length * CHAR_W + 16;
-}
-
-function memberText(m: Member): string {
-  if (m.kind === 'property') {
-    return `${m.modifier} ${m.name}${m.type ? ': ' + m.type : ''}`;
-  }
-  return `${m.modifier} ${m.name}(${m.params || ''})${m.type ? ': ' + m.type : ''}`;
-}
+import { ParsedData, Box, Line, Diagram, ClassInfo, PackageBox } from './types';
+import { memberText, textWidth, LAYOUT } from './utils';
 
 export function layoutDiagram(parsed: ParsedData): Diagram {
   const { classes, relations } = parsed;
-  if (!classes.length) return { boxes: [], lines: [], width: 0, height: 0 };
+  if (!classes.length) return { boxes: [], lines: [], packages: [], width: 0, height: 0 };
 
-  const nameMap: Record<string, any> = {};
+  const nameMap: Record<string, ClassInfo> = {};
   classes.forEach(c => nameMap[c.name] = c);
 
   // 1. 构建依赖图
@@ -41,59 +26,15 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     }
   });
 
-  // 2. 分类：有继承关系的 vs 独立的
-  const hasInheritance = new Set<string>();
-  Object.keys(childrenOf).forEach(p => hasInheritance.add(p));
-  Object.keys(parentOf).forEach(c => hasInheritance.add(c));
-  
-  // 3. 构建层级结构
-  const levels: string[][] = [];
-  const placed = new Set<string>();
-
-  // 找所有根节点（没有父类的）
-  const roots = classes.filter(c => !parentOf[c.name]).map(c => c.name);
-  
-  // 按类型排序根节点：先抽象类，再接口，最后具体类
-  roots.sort((a, b) => {
-    const ca = nameMap[a], cb = nameMap[b];
-    if (ca.isAbstract && !cb.isAbstract) return -1;
-    if (!ca.isAbstract && cb.isAbstract) return 1;
-    if (ca.isInterface && !cb.isInterface) return -1;
-    if (!ca.isInterface && cb.isInterface) return 1;
-    return 0;
+  // 2. 按包分组
+  const packageGroups = new Map<string, string[]>();
+  classes.forEach(c => {
+    const pkg = c.packageName || 'default';
+    if (!packageGroups.has(pkg)) packageGroups.set(pkg, []);
+    packageGroups.get(pkg)!.push(c.name);
   });
 
-  // BFS 构建层级
-  let queue = [...roots];
-  while (queue.length) {
-    const level: string[] = [];
-    const nextQueue: string[] = [];
-    
-    queue.forEach(name => {
-      if (placed.has(name)) return;
-      placed.add(name);
-      level.push(name);
-      
-      (childrenOf[name] || []).forEach(child => {
-        if (!placed.has(child)) nextQueue.push(child);
-      });
-    });
-    
-    if (level.length) {
-      // 层内排序：按成员数量、子类数量排序
-      level.sort((a, b) => {
-        const aImpl = (implementsOf[a] || []).length;
-        const bImpl = (implementsOf[b] || []).length;
-        const aChildren = (childrenOf[a] || []).length;
-        const bChildren = (childrenOf[b] || []).length;
-        return (bImpl + bChildren) - (aImpl + aChildren);
-      });
-      levels.push(level);
-    }
-    queue = nextQueue;
-  }
-
-  // 4. 计算每个类框的尺寸
+  // 3. 计算类框尺寸
   const boxMap: Record<string, Box> = {};
   classes.forEach(c => {
     const props = c.members.filter(m => m.kind === 'property');
@@ -101,8 +42,8 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     
     const stereotypeH = c.isInterface || c.isAbstract ? 16 : 0;
     const titleH = 26;
-    const propsH = Math.max(props.length, 1) * LINE_H;
-    const methsH = Math.max(meths.length, 1) * LINE_H;
+    const propsH = Math.max(props.length, 1) * LAYOUT.LINE_H;
+    const methsH = Math.max(meths.length, 1) * LAYOUT.LINE_H;
     const h = stereotypeH + titleH + 1 + propsH + 1 + methsH + 8;
 
     const lines = [
@@ -119,54 +60,164 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     boxMap[c.name] = { ...c, x: 0, y: 0, w, h, lines, props, meths };
   });
 
-  // 5. 分层放置
-  let curY = 0;
-  const allBoxes: Box[] = [];
+  // 4. 构建层级结构（按包组织）
+  const levels: string[][] = [];
+  const placed = new Set<string>();
 
-  // 计算每层最大宽度用于居中
-  const levelWidths = levels.map(level => 
-    level.reduce((sum, name) => sum + boxMap[name].w + PAD_X, -PAD_X)
-  );
-  const maxWidth = Math.max(...levelWidths, 0);
-
-  levels.forEach((level, levelIdx) => {
-    let totalW = 0;
-    level.forEach((name, i) => {
-      totalW += boxMap[name].w;
-      if (i < level.length - 1) totalW += PAD_X;
-    });
-
-    // 居中放置
-    let curX = (maxWidth - totalW) / 2;
-    let rowMaxH = 0;
-
-    level.forEach(name => {
-      const b = boxMap[name];
-      b.x = curX;
-      b.y = curY;
-      curX += b.w + PAD_X;
-      rowMaxH = Math.max(rowMaxH, b.h);
-      allBoxes.push(b);
-    });
-
-    curY += rowMaxH + PAD_Y;
+  // 找根节点（没有父类的）
+  const roots = classes.filter(c => !parentOf[c.name]).map(c => c.name);
+  
+  // 排序：抽象类 > 接口 > 具体类，同包的放一起
+  roots.sort((a, b) => {
+    const ca = nameMap[a], cb = nameMap[b];
+    // 先按包排序
+    const pkgA = ca.packageName || '';
+    const pkgB = cb.packageName || '';
+    if (pkgA !== pkgB) return pkgA.localeCompare(pkgB);
+    // 再按类型排序
+    if (ca.isAbstract && !cb.isAbstract) return -1;
+    if (!ca.isAbstract && cb.isAbstract) return 1;
+    if (ca.isInterface && !cb.isInterface) return -1;
+    if (!ca.isInterface && cb.isInterface) return 1;
+    return 0;
   });
 
-  // 6. 计算边界并偏移
+  // BFS 构建层级，同包的类尽量在同一层
+  let queue = [...roots];
+  while (queue.length) {
+    const level: string[] = [];
+    const nextQueue: string[] = [];
+    
+    queue.forEach(name => {
+      if (placed.has(name)) return;
+      placed.add(name);
+      level.push(name);
+      
+      (childrenOf[name] || []).forEach(child => {
+        if (!placed.has(child)) nextQueue.push(child);
+      });
+    });
+    
+    if (level.length) {
+      level.sort((a, b) => {
+        const pkgA = nameMap[a].packageName || '';
+        const pkgB = nameMap[b].packageName || '';
+        return pkgA.localeCompare(pkgB);
+      });
+      levels.push(level);
+    }
+    queue = nextQueue;
+  }
+
+  // 5. 按包布局 - 每个包内的类放在一起
+  const PAD = LAYOUT.PAD_X;
+  const GAP = 30; // 包内间距
+  const PKG_GAP = 50; // 包间间距
+  
+  // 计算每层每个包的宽度
+  interface PackageInLevel {
+    name: string;
+    boxes: Box[];
+    totalW: number;
+    maxH: number;
+  }
+  
+  // 收集所有包
+  const allPackages = new Set<string>();
+  classes.forEach(c => allPackages.add(c.packageName || 'default'));
+  
+  // 按层和包组织
+  const levelPackages: PackageInLevel[][] = [];
+  levels.forEach(level => {
+    const pkgs = new Map<string, Box[]>();
+    level.forEach(name => {
+      const pkg = nameMap[name].packageName || 'default';
+      if (!pkgs.has(pkg)) pkgs.set(pkg, []);
+      pkgs.get(pkg)!.push(boxMap[name]);
+    });
+    
+    const levelPkgs: PackageInLevel[] = [];
+    pkgs.forEach((boxes, name) => {
+      const totalW = boxes.reduce((sum, b) => sum + b.w, 0) + (boxes.length - 1) * GAP;
+      const maxH = Math.max(...boxes.map(b => b.h));
+      levelPkgs.push({ name, boxes, totalW, maxH });
+    });
+    levelPackages.push(levelPkgs);
+  });
+
+  // 6. 计算包的位置
+  const packageBoxes: PackageBox[] = [];
+  const packagePositions = new Map<string, { x: number; y: number; w: number; h: number }>();
+  
+  let curY = 20;
+  let globalMaxW = 0;
+  
+  levelPackages.forEach(levelPkgs => {
+    let curX = 20;
+    let rowMaxH = 0;
+    
+    levelPkgs.forEach(pkg => {
+      const pkgX = curX;
+      const pkgY = curY;
+      const pkgW = pkg.totalW + 2 * GAP;
+      const pkgH = pkg.maxH + 2 * GAP + 20; // 20 for package name
+      
+      // 记录包位置
+      packagePositions.set(pkg.name, { x: pkgX, y: pkgY, w: pkgW, h: pkgH });
+      
+      // 放置类框
+      let boxX = pkgX + GAP;
+      pkg.boxes.forEach(box => {
+        box.x = boxX;
+        box.y = pkgY + GAP + 20; // 包名下方
+        boxX += box.w + GAP;
+      });
+      
+      packageBoxes.push({
+        name: pkg.name,
+        x: pkgX,
+        y: pkgY,
+        w: pkgW,
+        h: pkgH,
+        boxes: pkg.boxes
+      });
+      
+      curX += pkgW + PKG_GAP;
+      rowMaxH = Math.max(rowMaxH, pkgH);
+      globalMaxW = Math.max(globalMaxW, curX);
+    });
+    
+    curY += rowMaxH + PKG_GAP;
+  });
+
+  // 7. 计算边界
+  const allBoxes = Object.values(boxMap);
   const minX = allBoxes.length ? Math.min(...allBoxes.map(b => b.x)) : 0;
   const maxX = allBoxes.length ? Math.max(...allBoxes.map(b => b.x + b.w)) : 0;
   const maxY = allBoxes.length ? Math.max(...allBoxes.map(b => b.y + b.h)) : 0;
 
-  const offsetX = -minX + PAD_X;
-  allBoxes.forEach(b => { 
+  // 偏移使所有坐标为正
+  const offsetX = -minX + 30;
+  const offsetY = 30;
+  
+  allBoxes.forEach(b => {
     b.x += offsetX;
-    b.y += PAD_Y;
+    b.y += offsetY;
+  });
+  
+  packageBoxes.forEach(pkg => {
+    pkg.x += offsetX;
+    pkg.y += offsetY;
+    pkg.boxes.forEach(b => {
+      b.x += offsetX;
+      b.y += offsetY;
+    });
   });
 
-  const width = maxX - minX + PAD_X * 2;
-  const height = maxY + PAD_Y * 2;
+  const width = Math.max(globalMaxW, maxX - minX + 60) + 30;
+  const height = curY + 60;
 
-  // 7. 计算关系连线（直线）
+  // 8. 计算关系连线
   const lines: Line[] = relations.map(r => {
     const from = boxMap[r.from];
     const to = boxMap[r.to];
@@ -175,13 +226,11 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     let fx: number, fy: number, tx: number, ty: number;
 
     if (r.type === 'extends' || r.type === 'implements') {
-      // 继承/实现：子类顶部中心 -> 父类底部中心
       fx = from.x + from.w / 2;
       fy = from.y;
       tx = to.x + to.w / 2;
       ty = to.y + to.h;
     } else {
-      // 关联：找最近的边
       const fromCx = from.x + from.w / 2;
       const fromCy = from.y + from.h / 2;
       const toCx = to.x + to.w / 2;
@@ -190,7 +239,6 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
       const dx = toCx - fromCx;
       const dy = toCy - fromCy;
       
-      // 计算从 from 边缘出发的点
       if (Math.abs(dx) * from.h > Math.abs(dy) * from.w) {
         fx = dx > 0 ? from.x + from.w : from.x;
         fy = fromCy;
@@ -199,7 +247,6 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
         fy = dy > 0 ? from.y + from.h : from.y;
       }
       
-      // 计算到 to 边缘的点
       if (Math.abs(dx) * to.h > Math.abs(dy) * to.w) {
         tx = dx > 0 ? to.x : to.x + to.w;
         ty = toCy;
@@ -212,5 +259,5 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     return { ...r, fx, fy, tx, ty };
   }).filter((x): x is Line => x !== null);
 
-  return { boxes: allBoxes, lines, width, height };
+  return { boxes: allBoxes, lines, packages: packageBoxes, width, height };
 }
