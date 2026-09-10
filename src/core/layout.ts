@@ -16,14 +16,59 @@ export function setLayoutConfig(config: Partial<typeof LAYOUT_CONFIG>) {
 
 // 布局配置
 const CONFIG = {
-  MAX_ROW_WIDTH: 1600,      // 最大行宽
   PKG_PADDING: 20,          // 包内边距
   PKG_GAP: 30,              // 包间距
   ROW_GAP: 40,              // 行间距
   BOX_GAP: 15,              // 类框间距
   MIN_BOX_WIDTH: 160,       // 最小框宽
   MAX_BOX_WIDTH: 280,       // 最大框宽
+  TARGET_ASPECT: 1.15,      // 目标宽高比（越接近 1 越方）
 };
+
+interface PackageInfo {
+  name: string;
+  classNames: string[];
+  contentW: number;
+  contentH: number;
+}
+
+const pkgWidth = (p: PackageInfo) => p.contentW + 2 * CONFIG.PKG_PADDING;
+const rowWidth = (row: PackageInfo[]) =>
+  row.reduce((s, p, i) => s + (i > 0 ? CONFIG.PKG_GAP : 0) + pkgWidth(p), 0);
+const rowHeight = (row: PackageInfo[]) =>
+  Math.max(...row.map(p => p.contentH + 2 * CONFIG.PKG_PADDING + 20));
+
+/** 按给定行宽把包分到各行，返回行划分与整体尺寸 */
+function packIntoRows(pkgs: PackageInfo[], maxWidth: number): { rows: PackageInfo[][]; width: number; height: number } {
+  const rows: PackageInfo[][] = [];
+  let current: PackageInfo[] = [];
+  let currentW = 0;
+  for (const pkg of pkgs) {
+    const w = pkgWidth(pkg);
+    if (current.length > 0 && currentW + CONFIG.PKG_GAP + w > maxWidth) {
+      rows.push(current);
+      current = [];
+      currentW = 0;
+    }
+    current.push(pkg);
+    currentW += (current.length === 1 ? 0 : CONFIG.PKG_GAP) + w;
+  }
+  if (current.length > 0) rows.push(current);
+
+  let width = 0;
+  let height = 0;
+  for (const row of rows) {
+    width = Math.max(width, rowWidth(row));
+    height += rowHeight(row) + CONFIG.ROW_GAP;
+  }
+  return { rows, width, height };
+}
+
+/** 宽高比与目标值的接近程度（越小越好） */
+function aspectScore(p: { width: number; height: number }): number {
+  const aspect = p.width / Math.max(p.height, 1);
+  return Math.abs(Math.log(aspect / CONFIG.TARGET_ASPECT));
+}
 
 export function layoutDiagram(parsed: ParsedData): Diagram {
   const { classes, relations } = parsed;
@@ -91,13 +136,6 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
   });
 
   // 计算每个包的内容尺寸
-  interface PackageInfo {
-    name: string;
-    classNames: string[];
-    contentW: number;
-    contentH: number;
-  }
-  
   const packageInfos: PackageInfo[] = [];
   
   packageGroups.forEach((classNames, name) => {
@@ -112,50 +150,41 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     packageInfos.push({ name, classNames: sorted, contentW, contentH });
   });
 
-  // 4. 行式装箱布局 - 将包排列成多行
-  const rows: PackageInfo[][] = [];
-  let currentRow: PackageInfo[] = [];
-  let currentRowWidth = 0;
-  
-  // 按面积降序排序，大的包优先放置（First Fit Decreasing）
+  // 4. 排序 + 选择最接近正方形的行宽
+  // 按面积降序（大的 / 被依赖多的包优先，保持在最上方）
   packageInfos.sort((a, b) => (b.contentW * b.contentH) - (a.contentW * a.contentH));
-  
-  packageInfos.forEach(pkg => {
-    const pkgTotalW = pkg.contentW + 2 * CONFIG.PKG_PADDING;
-    
-    if (currentRow.length > 0 && currentRowWidth + CONFIG.PKG_GAP + pkgTotalW > CONFIG.MAX_ROW_WIDTH) {
-      rows.push(currentRow);
-      currentRow = [];
-      currentRowWidth = 0;
-    }
-    
-    currentRow.push(pkg);
-    currentRowWidth += (currentRow.length === 1 ? 0 : CONFIG.PKG_GAP) + pkgTotalW;
-  });
-  
-  if (currentRow.length > 0) {
-    rows.push(currentRow);
-  }
 
-  // 5. 计算每个包和类的最终位置
+  const totalWidth = packageInfos.reduce((s, p, i) => s + (i > 0 ? CONFIG.PKG_GAP : 0) + pkgWidth(p), 0);
+  const maxPkgWidth = Math.max(...packageInfos.map(p => pkgWidth(p)));
+
+  // 在 [maxPkgWidth, totalWidth] 间采样若干行宽，选宽高比最接近目标的
+  let best = packIntoRows(packageInfos, totalWidth);
+  let bestScore = aspectScore(best);
+  const STEPS = 80;
+  for (let i = 1; i <= STEPS; i++) {
+    const candidate = maxPkgWidth + ((totalWidth - maxPkgWidth) * i) / STEPS;
+    const packed = packIntoRows(packageInfos, candidate);
+    const score = aspectScore(packed);
+    if (score < bestScore) {
+      best = packed;
+      bestScore = score;
+    }
+  }
+  const rows = best.rows;
+
+  // 5. 计算每个包和类的最终位置（每行居中，整体更接近矩形）
   let globalY = 20;
-  let globalMaxW = 0;
-  
-  rows.forEach(row => {
-    // 计算本行最大高度
-    const rowMaxH = Math.max(...row.map(pkg => pkg.contentH + 2 * CONFIG.PKG_PADDING + 20));
-    
-    // 计算本行总宽度，用于居中
-    const rowTotalW = row.reduce((sum, pkg, i) => {
-      return sum + (i > 0 ? CONFIG.PKG_GAP : 0) + pkg.contentW + 2 * CONFIG.PKG_PADDING;
-    }, 0);
-    
-    let curX = 20;
-    
+  const rowWidths = rows.map(r => rowWidth(r));
+  const maxRowW = rowWidths.length ? Math.max(...rowWidths) : 0;
+
+  rows.forEach((row, ri) => {
+    const rowMaxH = rowHeight(row);
+    let curX = 20 + (maxRowW - rowWidths[ri]) / 2;
+
     row.forEach(pkg => {
-      const pkgW = pkg.contentW + 2 * CONFIG.PKG_PADDING;
+      const pkgW = pkgWidth(pkg);
       const pkgH = rowMaxH;
-      
+
       // 放置类框
       layoutBoxesInPackage(
         pkg.classNames.map(n => boxMap[n]),
@@ -164,7 +193,7 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
         CONFIG.BOX_GAP,
         CONFIG.BOX_GAP
       );
-      
+
       packageBoxes.push({
         name: pkg.name,
         x: curX,
@@ -173,17 +202,16 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
         h: pkgH,
         boxes: pkg.classNames.map(n => boxMap[n])
       });
-      
+
       curX += pkgW + CONFIG.PKG_GAP;
-      globalMaxW = Math.max(globalMaxW, curX);
     });
-    
+
     globalY += rowMaxH + CONFIG.ROW_GAP;
   });
 
   // 6. 计算边界
   const allBoxes = Object.values(boxMap);
-  const width = Math.max(globalMaxW, 800);
+  const width = Math.max(maxRowW + 40, 800);
   const height = globalY + 40;
 
   // 7. 计算关系连线

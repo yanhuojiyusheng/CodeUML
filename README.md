@@ -1,136 +1,173 @@
 # CodeUML
 
-代码转 UML 类图可视化工具
+Turn TypeScript source code into UML class diagrams, right in the browser.
 
-## 功能
+**English** | [简体中文](README.zh-CN.md)
 
-- 🔄 实时解析代码生成 UML 类图
-- 📊 支持类、接口、抽象类、枚举
-- 🔗 自动检测继承、实现、关联、聚合、组合、依赖关系
-- 📥 导出 Draw.io XML 格式
-- 📥 导出 SVG 图片
-- 📝 生成 PlantUML 语法
+## Features
 
-## 使用方法
+- 🔄 **Real-time parsing** — the diagram updates as you type
+- 📊 Supports **classes, interfaces, abstract classes and enums**
+- 🔗 Detects **inheritance, implementation, association, aggregation, composition and dependency**
+- 🗂️ **Multi-file projects** — drag in a folder and files are grouped into packages
+  (package name = folder path + file name)
+- 🔍 **Zoom & pan** — Ctrl/⌘ + wheel or the toolbar buttons, middle-mouse drag to pan
+- 🎯 **Highlighting** — click a class to highlight its relations, double-click a relation to highlight it and both ends
+- 🎚️ **Relation strength modes** — show all relations, or only the stronger ones
+- 📥 **Export** to Draw.io XML, SVG and PlantUML
+- ⚪ Light theme by default
+- 🚀 **Zero-dependency** static web server (Node built-in `http`)
 
-### 安装
+## Getting Started
+
+### Requirements
+
+- Node.js 18+
+
+### Install
 
 ```bash
-git clone https://github.com/your-username/codeuml.git
-cd codeuml
+git clone https://github.com/yanhuojiyusheng/CodeUML.git
+cd CodeUML
 npm install
 ```
 
-### 开发
+### Run as a web server
 
 ```bash
-npm run dev    # 监听模式，自动编译
+npm start          # build + start the server + open the browser
 ```
 
-### 启动网页服务
+Default address is `http://localhost:3000` (change with the `PORT` environment variable).
 
 ```bash
-npm start      # 构建并启动服务器，自动打开浏览器
+PORT=8080 npm start
+npm start -- --debug   # log every HTTP request
 ```
 
-默认地址 `http://localhost:3000`（可用 `PORT` 环境变量修改）。
-零依赖，使用 Node 内置 `http` 提供静态文件服务。
+### Use without the server
 
-### 使用
+```bash
+npm run build      # bundle to dist/bundle.js
+# then open index.html directly in a browser
+```
 
-1. 左侧粘贴代码
-2. 右侧实时显示 UML 类图
-3. 点击标签切换：图表 / Draw.io XML / PlantUML
+> The page loads the TypeScript compiler from a CDN, so an internet connection is required.
 
-> 也可不用服务器，直接用浏览器打开 `index.html`（需先 `npm run build`）。
+## Usage
 
-### 文件栏
+1. Paste TypeScript code into the left editor (or drop `.ts` / `.tsx` files).
+2. The UML class diagram is rendered on the right in real time.
+3. Switch tabs: **Diagram / Draw.io XML / PlantUML**.
 
-- **拖入文件夹**：递归读取其中的 `.ts` / `.tsx`，相对路径作为文件夹（包名 = 文件夹路径 + 文件名）
-- **跳过规则**：名为 `dist` 和 `node_modules` 的目录**整个跳过**（不读取、不显示）
-- **文件夹**：可新建子文件夹、双击重命名、`×` 删除（连同其下所有文件）
-- 拖入大量文件时采用分批读取 + 解析去抖，边读边显示，不会卡住页面
+### File sidebar
 
-## 项目结构
+- **Drop a folder** to load every `.ts` / `.tsx` file inside it, recursively.
+  Relative paths become folders (package name = folder path + file name).
+- **Skip rules**: directories named `dist` and `node_modules` are skipped entirely
+  (not read, not shown).
+- **Folders**: create subfolders (select a folder, then `+ Folder`), rename by
+  double-clicking, delete with `×` (removes everything inside).
+- **Bulk loading** uses chunked reading plus debounced parsing, so the UI stays
+  responsive and files appear as they are read.
+- The `⊟` button at the top collapses / expands all folders.
+
+### Diagram controls
+
+| Action | How |
+|--------|-----|
+| Zoom | Ctrl/⌘ + wheel, or `−` / `+` / `Reset` |
+| Pan | Hold the middle mouse button and drag |
+| Highlight a class | Click it |
+| Highlight a relation | Double-click it |
+| Relation strength | `Relations: All / Stronger / Strongest` |
+
+## Project Structure
 
 ```
-codeuml/
-├── server.js               # 静态文件服务器（零依赖，启动后打开浏览器）
-├── index.html              # 页面骨架（引入 styles/app.css 与 dist/bundle.js）
+CodeUML/
+├── server.js               # Static file server (zero deps, opens the browser)
+├── index.html              # Page shell (loads styles/app.css and dist/bundle.js)
 ├── styles/
-│   └── app.css             # 页面样式
+│   └── app.css             # Page styles
 ├── src/
-│   ├── main.ts             # 入口：组装 core 能力与 ui 交互，启动应用
+│   ├── main.ts             # Entry: wires core capabilities to the UI and boots
 │   │
-│   ├── core/               # 纯逻辑层（零 DOM，可独立测试）
-│   │   ├── types.ts        # 核心类型定义
-│   │   ├── utils.ts        # 转义 / 文本宽度 / LAYOUT 常量
-│   │   ├── members.ts      # 成员筛选（布局与渲染共用）
-│   │   ├── parser.ts       # 代码解析器
-│   │   ├── layout.ts       # 分层布局引擎
-│   │   ├── merge.ts        # 多文件合并 / 跨文件类型感知
-│   │   ├── relations.ts    # 关系强弱分级与显示模式
-│   │   ├── svg.ts          # SVG 渲染器
-│   │   ├── drawio.ts       # Draw.io XML 导出器
-│   │   └── plantuml.ts     # PlantUML 文本生成
+│   ├── core/               # Pure logic (no DOM, independently testable)
+│   │   ├── types.ts        # Core type definitions
+│   │   ├── utils.ts        # Escaping / text width / LAYOUT constants
+│   │   ├── members.ts      # Member selection (shared by layout and rendering)
+│   │   ├── parser.ts       # Code parser
+│   │   ├── layout.ts       # Layout engine
+│   │   ├── merge.ts        # Multi-file merge / cross-file type awareness
+│   │   ├── relations.ts    # Relation strength and display modes
+│   │   ├── svg.ts          # SVG renderer
+│   │   ├── drawio.ts       # Draw.io XML exporter
+│   │   └── plantuml.ts     # PlantUML text generator
 │   │
-│   └── ui/                 # DOM 交互层
-│       ├── dom.ts          # 元素获取 / HTML 转义
-│       ├── samples.ts      # 默认示例代码
-│       ├── highlight.ts    # 类图高亮
-│       ├── tabs.ts         # 文件标签管理
-│       ├── panes.ts        # 分栏拖拽
-│       └── actions.ts      # 导出动作
+│   └── ui/                 # DOM layer
+│       ├── dom.ts          # Element lookup / HTML escaping
+│       ├── samples.ts      # Default sample code
+│       ├── highlight.ts    # Diagram highlighting
+│       ├── tabs.ts         # File tabs and folders
+│       ├── panes.ts        # Split-pane resizing
+│       ├── actions.ts      # Export actions
+│       └── zoom.ts         # Zoom & pan
 │
-├── tests/                  # 测试
-└── dist/                   # 构建输出（bundle.js）
+├── tests/                  # Tests
+└── dist/                   # Build output (bundle.js)
 ```
 
-### 核心模块
+### Core modules
 
-| 模块 | 职责 |
-|------|------|
-| `core/parser.ts` | 解析代码，提取类/接口/关系 |
-| `core/layout.ts` | 分层布局算法，按继承关系组织类的位置 |
-| `core/svg.ts` | 将布局结果渲染为 SVG，绘制类框和关系箭头 |
-| `core/drawio.ts` | 生成 Draw.io 兼容的 mxfile XML 格式 |
-| `core/plantuml.ts` | 生成 PlantUML 文本 |
-| `core/members.ts` | 成员筛选规则（布局算高度与渲染画内容共用，保证一致） |
-| `ui/*` | DOM 事件绑定、文件标签、分栏、导出等交互 |
-| `main.ts` | 组装与启动 |
+| Module | Responsibility |
+|--------|----------------|
+| `core/parser.ts` | Parses code, extracts classes / interfaces / relations |
+| `core/layout.ts` | Places classes and picks a near-square arrangement of packages |
+| `core/svg.ts` | Renders the layout to SVG (boxes and relation arrows) |
+| `core/drawio.ts` | Generates Draw.io-compatible mxfile XML |
+| `core/plantuml.ts` | Generates PlantUML text |
+| `core/members.ts` | Member selection rules (shared by layout height and rendering) |
+| `ui/*` | DOM events, file sidebar, split panes, exports |
+| `main.ts` | Wiring and boot |
 
-### 开发命令
+### Development commands
 
 ```bash
-npm run dev            # 监听构建
-npm run build          # 打包到 dist/bundle.js
-npm test               # 运行测试（默认不收集覆盖率）
-npm run test:coverage  # 运行测试并生成覆盖率报告
-npm run typecheck      # 类型检查
+npm run dev            # rebuild on change
+npm run build          # bundle to dist/bundle.js
+npm test               # run tests (no coverage by default)
+npm run test:coverage  # run tests with a coverage report
+npm run typecheck      # type check
+node server.js --check # server self-check
 ```
 
-## 支持的 UML 关系
+## Supported UML Relations
 
-| 关系 | 语法 | 箭头样式 |
-|------|------|---------|
-| 继承 | `extends` | 实线 + 空心三角 ▷ |
-| 实现 | `implements` | 虚线 + 空心三角 ▷ |
-| 关联 | 属性引用 | 实线 + 实心三角 ▶ |
-| 聚合 | 构造函数参数 | 实线 + 空心菱形 ◇ |
-| 组合 | `new` 初始化 | 实线 + 实心菱形 ◆ |
-| 依赖 | 仅函数参数 | 虚线 + 开放箭头 → |
+| Relation | Detected from | Arrow |
+|----------|---------------|-------|
+| Inheritance | `extends` | solid line + hollow triangle ▷ |
+| Implementation | `implements` | dashed line + hollow triangle ▷ |
+| Association | a plain property reference | solid line + filled triangle ▶ |
+| Aggregation | an array / collection property (`T[]`, `Array<T>`, `Set<T>`, …) | solid line + hollow diamond ◇ |
+| Composition | a property initialized with `new` | solid line + filled diamond ◆ |
+| Dependency | a method parameter / return type / `new` inside a method body | dashed line + open arrow → |
 
-## 支持的语言
+Multiplicity: `*` for arrays/collections, `0..1` for optional or nullable types, `1` otherwise.
 
-- TypeScript / JavaScript (当前)
-- 更多语言 planned...
+## Supported Languages
 
-## 技术栈
+- TypeScript / JavaScript (current)
+- More languages planned
 
-- TypeScript Compiler API — 代码解析
-- SVG — 图表渲染
-- esbuild — 构建打包
-- 纯前端，无需后端服务
+## Tech Stack
+
+- **TypeScript Compiler API** — code parsing
+- **SVG** — diagram rendering
+- **esbuild** — bundling
+- **Node built-in `http`** — static file server
+- **Jest** — tests
+- Pure frontend, no backend services
 
 ## License
 

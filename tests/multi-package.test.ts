@@ -598,6 +598,22 @@ describe('多包合并 - 布局集成', () => {
     expect(diagram.packages.map(p => p.name)).toEqual(['real']);
   });
 
+  test('包多时整体形状接近正方形，不会退化成细长条', () => {
+    const files: SourceFile[] = [];
+    for (let p = 0; p < 40; p++) {
+      let content = '';
+      for (let c = 0; c < 4; c++) {
+        content += `class P${p}C${c} { a: string; b: number; m(x: number): void {} }\n`;
+      }
+      files.push({ name: 'pkg' + p, content });
+    }
+    const { merged } = build(files);
+    const d = layoutDiagram(merged);
+    const aspect = d.width / d.height;
+    expect(aspect).toBeGreaterThan(0.5);
+    expect(aspect).toBeLessThan(2);
+  });
+
   test('同名类在 Draw.io 导出中只产生一个图形单元', () => {
     const { merged } = build([
       { name: 'v1', content: 'class User { name: string; }' },
