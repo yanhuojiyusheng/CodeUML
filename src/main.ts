@@ -1,10 +1,11 @@
 /** 主入口 */
 
-import { parseCode, parseCodeWithKnownTypes } from './parser';
+import { parseCode } from './parser';
+import { parseFilesWithCrossFileTypes, mergeParsedData } from './merge';
 import { layoutDiagram, setLayoutConfig } from './layout';
 import { renderSVG, setDisplayConfig } from './renderer';
 import { generateDrawioXML } from './exporter';
-import { ParsedData, ClassInfo, Relation, RelationType } from './types';
+import { ParsedData, RelationType } from './types';
 import { formatParsed, formatMergedPlantUML } from './plantuml';
 import { getElement } from './utils';
 
@@ -529,34 +530,16 @@ function mergeAllParsed(): Map<string, ParsedData> {
     const currentTab = tabs.find(t => t.id === activeTabId);
     if (currentTab) currentTab.content = codeEl.value;
   }
-  
-  // 第一步：收集所有文件的类型名称
-  const allTypeNames = new Set<string>();
+
+  const results = parseFilesWithCrossFileTypes(
+    tabs.map(tab => ({ name: tab.name, content: tab.content }))
+  );
+
+  // 回填每个标签的解析结果
   tabs.forEach(tab => {
-    try {
-      const parsed = parseCode(tab.content);
-      parsed.classes.forEach(c => allTypeNames.add(c.name));
-    } catch (e) {
-      // 忽略解析错误，继续收集
-    }
+    tab.parsed = results.get(tab.name);
   });
-  
-  // 第二步：使用合并的类型集合重新解析每个文件
-  const results = new Map<string, ParsedData>();
-  tabs.forEach(tab => {
-    try {
-      const parsed = parseCodeWithKnownTypes(tab.content, allTypeNames);
-      // 设置包名
-      parsed.classes.forEach(c => {
-        c.packageName = tab.name;
-      });
-      tab.parsed = parsed;
-      results.set(tab.name, parsed);
-    } catch (e) {
-      console.error(`Error parsing ${tab.name}:`, e);
-    }
-  });
-  
+
   return results;
 }
 
@@ -564,35 +547,8 @@ function mergeAllParsed(): Map<string, ParsedData> {
 function updateAll() {
   try {
     const allParsed = mergeAllParsed();
-    
-    // 合并所有类和关系
-    const allClasses: ClassInfo[] = [];
-    const allRelations: Relation[] = [];
-    const classPackageMap = new Map<string, string>(); // className -> packageName
-    
-    allParsed.forEach((parsed, packageName) => {
-      parsed.classes.forEach(c => {
-        // 检查是否已存在（跨文件引用）
-        if (!classPackageMap.has(c.name)) {
-          classPackageMap.set(c.name, packageName);
-          allClasses.push(c);
-        }
-      });
-      allRelations.push(...parsed.relations);
-    });
-    
-    // 去重关系
-    const uniqueRelations: Relation[] = [];
-    const relationKeys = new Set<string>();
-    allRelations.forEach(r => {
-      const key = `${r.from}-${r.type}-${r.to}`;
-      if (!relationKeys.has(key)) {
-        relationKeys.add(key);
-        uniqueRelations.push(r);
-      }
-    });
-    
-    const merged: ParsedData = { classes: allClasses, relations: uniqueRelations };
+    const { merged, classPackageMap } = mergeParsedData(allParsed);
+
     const diagram = layoutDiagram(merged);
     
     // 图表显示按当前关系模式过滤，XML/PlantUML 保留全量
@@ -604,7 +560,7 @@ function updateAll() {
     // 状态栏
     const fileNames = Array.from(allParsed.keys()).join(', ');
     const shownRelations = displayDiagram.lines.length;
-    statusEl.textContent = `文件: ${fileNames} | 类: ${allClasses.length} | 关系: ${uniqueRelations.length}（显示 ${shownRelations}）`;
+    statusEl.textContent = `文件: ${fileNames} | 类: ${merged.classes.length} | 关系: ${merged.relations.length}（显示 ${shownRelations}）`;
   } catch (e: unknown) {
     statusEl.textContent = '解析错误: ' + (e instanceof Error ? e.message : String(e));
     console.error(e);
@@ -647,15 +603,9 @@ function downloadFile(name: string, content: string, type: string) {
 /** 导出 Draw.io */
 function exportDrawio() {
   const allParsed = mergeAllParsed();
-  const allClasses: ClassInfo[] = [];
-  const allRelations: Relation[] = [];
-  
-  allParsed.forEach(parsed => {
-    allClasses.push(...parsed.classes);
-    allRelations.push(...parsed.relations);
-  });
-  
-  const diagram = layoutDiagram({ classes: allClasses, relations: allRelations });
+  const { merged } = mergeParsedData(allParsed);
+
+  const diagram = layoutDiagram(merged);
   downloadFile('class-diagram.drawio', generateDrawioXML(diagram), 'application/xml');
 }
 
@@ -667,16 +617,8 @@ function exportSVG() {
 /** 导出 PlantUML */
 function exportPlantUML() {
   const allParsed = mergeAllParsed();
-  const classPackageMap = new Map<string, string>();
-  
-  allParsed.forEach((parsed, packageName) => {
-    parsed.classes.forEach(c => {
-      if (!classPackageMap.has(c.name)) {
-        classPackageMap.set(c.name, packageName);
-      }
-    });
-  });
-  
+  const { classPackageMap } = mergeParsedData(allParsed);
+
   const content = formatMergedPlantUML(allParsed, classPackageMap);
   downloadFile('diagram.puml', content, 'text/plain');
 }

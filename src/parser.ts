@@ -162,7 +162,8 @@ function isUserType(typeName: string, knownTypes: Set<string>): boolean {
 }
 
 // 从类型文本中提取所有用户定义的类型（用于关系生成，支持联合类型拆分）
-function extractUserTypes(typeText: string, knownTypes: Set<string>): string[] {
+// excluded：当前作用域内的泛型参数名（它们遮蔽同名类，不应产生关系）
+function extractUserTypes(typeText: string, knownTypes: Set<string>, excluded?: Set<string>): string[] {
   if (!typeText) return [];
   const cleaned = cleanTypeName(typeText);
   if (!cleaned) return [];
@@ -171,7 +172,7 @@ function extractUserTypes(typeText: string, knownTypes: Set<string>): string[] {
   const parts = cleaned.split(',').map((s: string) => s.trim()).filter(Boolean);
   const result: string[] = [];
   for (const part of parts) {
-    if (isUserType(part, knownTypes)) {
+    if (isUserType(part, knownTypes) && !excluded?.has(part)) {
       result.push(part);
     }
   }
@@ -401,13 +402,14 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
         });
       }
 
-      // 接口属性关联
+      // 接口属性关联（排除接口泛型参数，支持联合类型）
+      const typeParams = new Set<string>(node.typeParameters?.map((tp: any) => tp.name.text) || []);
       const associationMap = new Map<string, string[]>();
       node.members.forEach((m: any) => {
         if (ts.isPropertySignature(m)) {
           const typeText = m.type?.getText(sf) || '';
-          const typeName = cleanTypeName(typeText);
-          if (typeName && isUserType(typeName, knownTypes) && typeName !== node.name.text) {
+          for (const typeName of extractUserTypes(typeText, knownTypes, typeParams)) {
+            if (typeName === node.name.text) continue;
             const fields = associationMap.get(typeName) || [];
             fields.push(m.name.getText(sf));
             associationMap.set(typeName, fields);
@@ -426,6 +428,18 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
       });
     }
     else if (ts.isClassDeclaration(node) && node.name) {
+      // 类级泛型参数：这些名称遮蔽同名类，不应产生关系
+      const classTypeParams = new Set<string>(
+        node.typeParameters?.map((tp: any) => tp.name.text) || []
+      );
+      /** 合并类级与成员级（方法/构造函数）泛型参数 */
+      const excludeParamsOf = (m: any): Set<string> => {
+        if (!m?.typeParameters?.length) return classTypeParams;
+        const merged = new Set(classTypeParams);
+        m.typeParameters.forEach((tp: any) => merged.add(tp.name.text));
+        return merged;
+      };
+
       // 继承/实现
       if (node.heritageClauses) {
         node.heritageClauses.forEach((h: any) => {
@@ -462,7 +476,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
             }
           }
           
-          const types = extractUserTypes(typeText, knownTypes);
+          const types = extractUserTypes(typeText, knownTypes, classTypeParams);
           types.forEach(t => propertyTypes.add(t));
           propertyEntries.push({
             fieldName: m.name.getText(sf),
@@ -485,7 +499,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
             if (hasModifier) {
               // 有修饰符 -> 参数属性，视为字段（关联），不是依赖
               constructorParamNames.add(p.name.getText(sf));
-              const types = extractUserTypes(pType, knownTypes);
+              const types = extractUserTypes(pType, knownTypes, classTypeParams);
               types.forEach(t => propertyTypes.add(t));
               propertyEntries.push({
                 fieldName: p.name.getText(sf),
@@ -502,7 +516,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
       const relationMap = new Map<string, { type: 'association' | 'aggregation' | 'composition', fields: string[], multiplicity: string }>();
       
       for (const entry of propertyEntries) {
-        const typeNames = extractUserTypes(entry.typeText, knownTypes);
+        const typeNames = extractUserTypes(entry.typeText, knownTypes, classTypeParams);
         for (const typeName of typeNames) {
           if (typeName === node.name.text) continue;
           
@@ -566,7 +580,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
             if (constructorParamNames.has(paramName)) return;
             
             const paramType = p.type?.getText(sf) || '';
-            for (const typeName of extractUserTypes(paramType, knownTypes)) {
+            for (const typeName of extractUserTypes(paramType, knownTypes, excludeParamsOf(m))) {
               if (typeName !== node.name.text && !propertyTypes.has(typeName)) {
                 dependencyTypes.add(typeName);
               }
@@ -576,7 +590,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
         
         // 返回值类型也可能产生依赖
         if (ts.isMethodDeclaration(m) && m.type) {
-          for (const returnType of extractUserTypes(m.type.getText(sf), knownTypes)) {
+          for (const returnType of extractUserTypes(m.type.getText(sf), knownTypes, excludeParamsOf(m))) {
             if (returnType !== node.name.text && !propertyTypes.has(returnType)) {
               dependencyTypes.add(returnType);
             }
@@ -585,13 +599,14 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
         
         // 遍历方法体中的 new 表达式
         if (ts.isMethodDeclaration(m) || ts.isConstructorDeclaration(m)) {
+          const memberTypeParams = excludeParamsOf(m);
           const visitNode = (node: any) => {
             // 处理 new 表达式
             if (ts.isNewExpression(node)) {
               const expr = node.expression;
               if (expr && ts.isIdentifier(expr)) {
                 const typeName = expr.text;
-                if (typeName && isUserType(typeName, knownTypes) && 
+                if (typeName && isUserType(typeName, knownTypes) && !memberTypeParams.has(typeName) &&
                     typeName !== node.name?.text && !propertyTypes.has(typeName)) {
                   dependencyTypes.add(typeName);
                 }
@@ -603,7 +618,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
                 const expr = node.expression.expression;
                 if (expr && ts.isIdentifier(expr)) {
                   const typeName = expr.text;
-                  if (typeName && isUserType(typeName, knownTypes) && 
+                  if (typeName && isUserType(typeName, knownTypes) && !memberTypeParams.has(typeName) &&
                       typeName !== node.name?.text && !propertyTypes.has(typeName)) {
                     dependencyTypes.add(typeName);
                   }

@@ -2,6 +2,11 @@
 
 import { Member, Relation, ParsedData } from './types';
 
+/** PlantUML 引号名中的双引号替换（PlantUML 无转义语法，用单引号代替） */
+function safeQuoted(name: string): string {
+  return String(name).replace(/"/g, "'");
+}
+
 /** 格式化成员 */
 export function formatMember(m: Member): string {
   const staticStr = m.isStatic ? '{static} ' : '';
@@ -50,7 +55,7 @@ export function formatParsed(parsed: ParsedData, packageName?: string): string {
   text += 'skinparam shadowing false\n\n';
 
   if (packageName) {
-    text += `package "${packageName}" {\n`;
+    text += `package "${safeQuoted(packageName)}" {\n`;
   }
 
   parsed.classes.forEach(c => {
@@ -112,7 +117,7 @@ export function formatMergedPlantUML(allParsed: Map<string, ParsedData>, classPa
 
   // 按包输出类
   allParsed.forEach((parsed, packageName) => {
-    text += `package "${packageName}" {\n`;
+    text += `package "${safeQuoted(packageName)}" {\n`;
 
     parsed.classes.forEach(c => {
       // 跨文件同名类只输出一次：PlantUML 中 as 别名必须全局唯一，
