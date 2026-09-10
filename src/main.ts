@@ -82,6 +82,9 @@ let tabs: FileTab[] = [];
 let activeTabId: string | null = null;
 let pendingSwitchTimer: number | undefined;
 
+// 文件名最大长度，防止手误粘贴超长文本
+const MAX_FILE_NAME_LENGTH = 400;
+
 // 默认示例代码
 const DEFAULT_CODE = `// 领域模型与设计模式示例 - models.ts
 // 覆盖：枚举、接口、继承/实现、组合/聚合/关联/依赖、构造函数参数属性、getter/setter
@@ -364,7 +367,8 @@ function generateId(): string {
 
 /** 创建新文件标签 */
 function createTab(name: string, content: string): FileTab {
-  const tab: FileTab = { id: generateId(), name, content };
+  const safeName = name.slice(0, MAX_FILE_NAME_LENGTH);
+  const tab: FileTab = { id: generateId(), name: safeName, content };
   tabs.push(tab);
   renderTabs();
   switchTab(tab.id);
@@ -446,6 +450,7 @@ function startRename(tabId: string, nameEl: HTMLElement) {
   const input = document.createElement('input');
   input.type = 'text';
   input.value = tab.name;
+  input.maxLength = MAX_FILE_NAME_LENGTH;
   input.style.cssText = 'background:#1e1e1e;color:#fff;border:1px solid #0078d4;padding:2px 6px;font-size:12px;flex:1;min-width:0;width:100%;box-sizing:border-box;outline:none;';
   
   nameEl.replaceWith(input);
@@ -453,7 +458,7 @@ function startRename(tabId: string, nameEl: HTMLElement) {
   input.select();
   
   const save = () => {
-    const newName = input.value.trim();
+    const newName = input.value.trim().slice(0, MAX_FILE_NAME_LENGTH);
     if (newName && newName !== tab.name) {
       tab.name = newName;
       updateAll();
