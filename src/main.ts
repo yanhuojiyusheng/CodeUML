@@ -13,6 +13,7 @@ import { createTabsController } from './ui/tabs';
 import { createHighlighter } from './ui/highlight';
 import { createSplitPanes } from './ui/panes';
 import { createExportActions } from './ui/actions';
+import { createZoom, createPan } from './ui/zoom';
 import { DEFAULT_CODE, DEFAULT_CODE_2, DEFAULT_CODE_3 } from './ui/samples';
 
 // ---------------- DOM 元素 ----------------
@@ -30,11 +31,25 @@ const dividerEl = byId<HTMLDivElement>('divider');
 const maxPropsEl = byId<HTMLInputElement>('max-props');
 const maxMethodsEl = byId<HTMLInputElement>('max-methods');
 const relationModeBtn = byId<HTMLButtonElement>('relation-mode-btn');
+const zoomLevelEl = byId<HTMLSpanElement>('zoom-level');
+const zoomInBtn = byId<HTMLButtonElement>('zoom-in');
+const zoomOutBtn = byId<HTMLButtonElement>('zoom-out');
+const zoomResetBtn = byId<HTMLButtonElement>('zoom-reset');
 
 // ---------------- 状态 ----------------
 let relationMode = 0;
 
 const highlighter = createHighlighter(diagramEl);
+
+const zoom = createZoom({
+  diagramEl,
+  levelEl: zoomLevelEl,
+  inBtn: zoomInBtn,
+  outBtn: zoomOutBtn,
+  resetBtn: zoomResetBtn,
+});
+
+createPan(diagramEl);
 
 // ---------------- 解析调度 ----------------
 /** 合并所有文件的解析结果（跨文件类型感知） */
@@ -57,6 +72,7 @@ function updateAll() {
     const displayDiagram = { ...diagram, lines: filterRelationsByMode(diagram.lines, relationMode) };
     diagramEl.innerHTML = renderSVG(displayDiagram, highlighter.relationKey);
     highlighter.sync(displayDiagram);
+    zoom.apply();
 
     xmlOutputEl.value = generateDrawioXML(diagram);
     parsedOutputEl.value = formatMergedPlantUML(allParsed, classPackageMap);

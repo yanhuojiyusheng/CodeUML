@@ -46,11 +46,16 @@ textarea{width:100%;height:100%;background:#1e1e1e;color:#d4d4d4;border:none;pad
 .tab{padding:8px 16px;cursor:pointer;font-size:12px;color:#888;border-bottom:2px solid transparent;transition:all .2s}
 .tab:hover{color:#ccc}
 .tab.active{color:#fff;border-bottom-color:#0078d4}
-#relation-mode-btn{margin-left:auto;background:#333;color:#ccc;border:1px solid #555;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap}
+#zoom-controls{display:flex;align-items:center;gap:4px;margin-left:auto;padding:0 4px}
+#zoom-controls button{background:#333;color:#ccc;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:12px;padding:4px 8px;line-height:1}
+#zoom-controls button:hover{background:#444;color:#fff;border-color:#888}
+#zoom-level{font-size:11px;color:#ccc;min-width:40px;text-align:center}
+#relation-mode-btn{margin-left:8px;background:#333;color:#ccc;border:1px solid #555;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap}
 #relation-mode-btn:hover{background:#444;color:#fff;border-color:#888}
 #diagram-view,#xml-view,#parsed-view{flex:1;overflow:auto;display:none}
 #diagram-view.active,#xml-view.active,#parsed-view.active{display:block}
 #diagram-view{background:#f8f8f8;padding:20px}
+#diagram-view.panning{cursor:grabbing}
 #xml-view textarea,#parsed-view textarea{background:#1e1e1e;color:#d4d4d4;width:100%;height:100%;border:none;padding:12px;font-family:'Fira Code','Cascadia Code',monospace;font-size:13px;resize:none;outline:none;line-height:1.5}
 .class-box rect{stroke:#333;stroke-width:1.5;rx:2}
 .class-box text{font-family:system-ui,sans-serif;font-size:12px}
