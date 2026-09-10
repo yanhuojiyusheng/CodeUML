@@ -152,14 +152,14 @@ function renderBox(b: Box): string {
   const titleH = (titleLines.length + 1) * 16 + 10;
 
   titleLines.forEach((l, i) => {
-    svg += `<text class="${l.cls}" x="${b.w / 2}" y="${y + 14 + i * 14}">${esc(l.text)}</text>`;
+    svg += `<text class="${l.cls}" x="${b.w / 2}" y="${y + 14 + i * 14}" text-anchor="middle" font-style="italic" fill="#666">${esc(l.text)}</text>`;
   });
   if (titleText) {
-    svg += `<text class="${titleText.cls}" x="${b.w / 2}" y="${y + 14 + titleLines.length * 14}">${esc(titleText.text)}</text>`;
+    svg += `<text class="${titleText.cls}" x="${b.w / 2}" y="${y + 14 + titleLines.length * 14}" text-anchor="middle" font-weight="bold">${esc(titleText.text)}</text>`;
   }
 
   y += titleH;
-  svg += `<line class="sep" x1="0" y1="${y}" x2="${b.w}" y2="${y}"/>`;
+  svg += `<line class="sep" x1="0" y1="${y}" x2="${b.w}" y2="${y}" stroke="#999" stroke-width="1"/>`;
   y += SEP;
 
   // 属性
@@ -174,7 +174,7 @@ function renderBox(b: Box): string {
   }
   
   y += propsH + SEP;
-  svg += `<line class="sep" x1="0" y1="${y}" x2="${b.w}" y2="${y}"/>`;
+  svg += `<line class="sep" x1="0" y1="${y}" x2="${b.w}" y2="${y}" stroke="#999" stroke-width="1"/>`;
   y += SEP;
 
   // 方法
@@ -235,5 +235,5 @@ export function renderSVG(diagram: Diagram): string {
     svg += renderRelation(r);
   });
 
-  return `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">${svg}</svg>`;
+  return `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif" font-size="12">${svg}</svg>`;
 }

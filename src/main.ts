@@ -4,7 +4,7 @@ import { parseCode, parseCodeWithKnownTypes } from './parser';
 import { layoutDiagram, setLayoutConfig } from './layout';
 import { renderSVG, setDisplayConfig } from './renderer';
 import { generateDrawioXML } from './exporter';
-import { ParsedData, ClassInfo, Relation } from './types';
+import { ParsedData, ClassInfo, Relation, RelationType } from './types';
 import { formatParsed, formatMergedPlantUML } from './plantuml';
 import { getElement } from './utils';
 
@@ -18,6 +18,38 @@ const editorPane = getElement<HTMLDivElement>('editor-pane');
 const fileTabsEl = getElement<HTMLDivElement>('file-tabs');
 const maxPropsEl = getElement<HTMLInputElement>('max-props');
 const maxMethodsEl = getElement<HTMLInputElement>('max-methods');
+const relationModeBtn = getElement<HTMLButtonElement>('relation-mode-btn');
+
+// 关系强弱分级：数字越大关系越强
+const RELATION_STRENGTH: Record<RelationType, number> = {
+  extends: 6,
+  implements: 5,
+  composition: 4,
+  aggregation: 3,
+  association: 2,
+  dependency: 1,
+};
+
+// 三种显示模式：全部 / 忽略最弱两种 / 只保留最强两种
+const RELATION_MODES = [
+  { label: '全部', minStrength: 0 },
+  { label: '较强', minStrength: 3 }, // 忽略 dependency + association
+  { label: '最强', minStrength: 5 }, // 忽略 dependency + association + aggregation + composition
+] as const;
+
+let relationMode = 0;
+
+/** 按显示模式过滤关系/连线 */
+function filterRelationsByMode<T extends { type: RelationType }>(items: T[], mode: number): T[] {
+  const min = RELATION_MODES[mode]?.minStrength ?? 0;
+  return items.filter(r => RELATION_STRENGTH[r.type] >= min);
+}
+
+relationModeBtn.addEventListener('click', () => {
+  relationMode = (relationMode + 1) % RELATION_MODES.length;
+  relationModeBtn.textContent = `关系: ${RELATION_MODES[relationMode].label}`;
+  updateAll();
+});
 
 // 初始化显示配置
 maxPropsEl.addEventListener('change', () => {
@@ -521,14 +553,16 @@ function updateAll() {
     const merged: ParsedData = { classes: allClasses, relations: uniqueRelations };
     const diagram = layoutDiagram(merged);
     
-    // 更新图表
-    diagramEl.innerHTML = renderSVG(diagram);
+    // 图表显示按当前关系模式过滤，XML/PlantUML 保留全量
+    const displayDiagram = { ...diagram, lines: filterRelationsByMode(diagram.lines, relationMode) };
+    diagramEl.innerHTML = renderSVG(displayDiagram);
     xmlOutputEl.value = generateDrawioXML(diagram);
     parsedOutputEl.value = formatMergedPlantUML(allParsed, classPackageMap);
     
     // 状态栏
     const fileNames = Array.from(allParsed.keys()).join(', ');
-    statusEl.textContent = `文件: ${fileNames} | 类: ${allClasses.length} | 关系: ${uniqueRelations.length}`;
+    const shownRelations = displayDiagram.lines.length;
+    statusEl.textContent = `文件: ${fileNames} | 类: ${allClasses.length} | 关系: ${uniqueRelations.length}（显示 ${shownRelations}）`;
   } catch (e: unknown) {
     statusEl.textContent = '解析错误: ' + (e instanceof Error ? e.message : String(e));
     console.error(e);
