@@ -18,6 +18,8 @@ const editorPane = getElement<HTMLDivElement>('editor-pane');
 const fileTabsEl = getElement<HTMLDivElement>('file-tabs');
 const fileSidebarEl = getElement<HTMLDivElement>('file-sidebar');
 const sidebarToggle = getElement<HTMLButtonElement>('sidebar-toggle');
+const sidebarResizer = getElement<HTMLDivElement>('sidebar-resizer');
+const rightPane = getElement<HTMLDivElement>('right-pane');
 const dividerEl = getElement<HTMLDivElement>('divider');
 const maxPropsEl = getElement<HTMLInputElement>('max-props');
 const maxMethodsEl = getElement<HTMLInputElement>('max-methods');
@@ -743,24 +745,25 @@ let dividerDragging = false;
 let dividerStartX = 0;
 let dividerStartWidth = 0;
 
-function setEditorWidth(width: number) {
-  const mainEl = editorPane.parentElement;
+function setRightWidth(width: number) {
+  const mainEl = rightPane.parentElement;
   if (!mainEl) return;
   const sidebarW = fileSidebarEl.getBoundingClientRect().width || 170;
+  const resizerW = sidebarResizer.getBoundingClientRect().width || 5;
   const dividerW = dividerEl.getBoundingClientRect().width || 6;
   const mainW = mainEl.getBoundingClientRect().width || window.innerWidth;
-  const maxW = Math.max(280, mainW - sidebarW - dividerW - 280); // 右侧至少保留 280px
-  const minW = 240;
+  const maxW = Math.max(280, mainW - sidebarW - resizerW - dividerW - 240); // 编辑器至少保留 240px
+  const minW = 280;
   const clamped = Math.max(minW, Math.min(maxW, width));
-  editorPane.style.flex = `0 0 ${clamped}px`;
-  editorPane.style.width = `${clamped}px`;
+  rightPane.style.flex = `0 0 ${clamped}px`;
+  rightPane.style.width = `${clamped}px`;
 }
 
 dividerEl.addEventListener('mousedown', (e: MouseEvent) => {
   e.preventDefault();
   dividerDragging = true;
   dividerStartX = e.clientX;
-  dividerStartWidth = editorPane.getBoundingClientRect().width;
+  dividerStartWidth = rightPane.getBoundingClientRect().width;
   dividerEl.classList.add('dragging');
   document.body.style.cursor = 'col-resize';
   document.body.style.userSelect = 'none';
@@ -768,7 +771,8 @@ dividerEl.addEventListener('mousedown', (e: MouseEvent) => {
 
 document.addEventListener('mousemove', (e: MouseEvent) => {
   if (!dividerDragging) return;
-  setEditorWidth(dividerStartWidth + (e.clientX - dividerStartX));
+  // 向右拖动 -> 右侧图表区变窄
+  setRightWidth(dividerStartWidth - (e.clientX - dividerStartX));
 });
 
 document.addEventListener('mouseup', () => {
@@ -789,7 +793,7 @@ dividerEl.addEventListener('touchstart', (e: TouchEvent) => {
   if (!touch) return;
   touchDragging = true;
   touchStartX = touch.clientX;
-  touchStartWidth = editorPane.getBoundingClientRect().width;
+  touchStartWidth = rightPane.getBoundingClientRect().width;
   dividerEl.classList.add('dragging');
 }, { passive: true });
 
@@ -797,7 +801,7 @@ dividerEl.addEventListener('touchmove', (e: TouchEvent) => {
   if (!touchDragging) return;
   const touch = e.touches[0];
   if (!touch) return;
-  setEditorWidth(touchStartWidth + (touch.clientX - touchStartX));
+  setRightWidth(touchStartWidth - (touch.clientX - touchStartX));
   e.preventDefault();
 }, { passive: false });
 
@@ -806,10 +810,86 @@ dividerEl.addEventListener('touchend', () => {
   dividerEl.classList.remove('dragging');
 });
 
-// 窗口缩放时，若已拖动过则重新约束编辑器宽度
+// 文件栏宽度拖动调整
+let sidebarDragging = false;
+let sidebarStartX = 0;
+let sidebarStartWidth = 0;
+
+function setSidebarWidth(width: number) {
+  const mainEl = fileSidebarEl.parentElement;
+  if (!mainEl) return;
+  const mainW = mainEl.getBoundingClientRect().width || window.innerWidth;
+  const resizerW = sidebarResizer.getBoundingClientRect().width || 5;
+  const dividerW = dividerEl.getBoundingClientRect().width || 6;
+  const rightW = rightPane.getBoundingClientRect().width || 0;
+  // 保证：文件栏 + 编辑器(>=240) + 分隔条 + 右侧面板 不超出主区域
+  const maxW = Math.max(180, Math.min(600, mainW - resizerW - dividerW - rightW - 240));
+  const minW = 120;
+  const clamped = Math.max(minW, Math.min(maxW, width));
+  fileSidebarEl.style.setProperty('--sidebar-width', `${clamped}px`);
+}
+
+sidebarResizer.addEventListener('mousedown', (e: MouseEvent) => {
+  e.preventDefault();
+  sidebarDragging = true;
+  sidebarStartX = e.clientX;
+  sidebarStartWidth = fileSidebarEl.getBoundingClientRect().width;
+  fileSidebarEl.classList.add('resizing');
+  sidebarResizer.classList.add('dragging');
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+});
+
+document.addEventListener('mousemove', (e: MouseEvent) => {
+  if (!sidebarDragging) return;
+  setSidebarWidth(sidebarStartWidth + (e.clientX - sidebarStartX));
+});
+
+document.addEventListener('mouseup', () => {
+  if (!sidebarDragging) return;
+  sidebarDragging = false;
+  fileSidebarEl.classList.remove('resizing');
+  sidebarResizer.classList.remove('dragging');
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+});
+
+// 文件栏触摸拖动
+let sidebarTouchDragging = false;
+let sidebarTouchStartX = 0;
+let sidebarTouchStartWidth = 0;
+
+sidebarResizer.addEventListener('touchstart', (e: TouchEvent) => {
+  const touch = e.touches[0];
+  if (!touch) return;
+  sidebarTouchDragging = true;
+  sidebarTouchStartX = touch.clientX;
+  sidebarTouchStartWidth = fileSidebarEl.getBoundingClientRect().width;
+  fileSidebarEl.classList.add('resizing');
+  sidebarResizer.classList.add('dragging');
+}, { passive: true });
+
+sidebarResizer.addEventListener('touchmove', (e: TouchEvent) => {
+  if (!sidebarTouchDragging) return;
+  const touch = e.touches[0];
+  if (!touch) return;
+  setSidebarWidth(sidebarTouchStartWidth + (touch.clientX - sidebarTouchStartX));
+  e.preventDefault();
+}, { passive: false });
+
+sidebarResizer.addEventListener('touchend', () => {
+  sidebarTouchDragging = false;
+  fileSidebarEl.classList.remove('resizing');
+  sidebarResizer.classList.remove('dragging');
+});
+
+// 窗口缩放时，重新约束右侧面板与文件栏宽度
 window.addEventListener('resize', () => {
-  if (editorPane.style.flex) {
-    setEditorWidth(editorPane.getBoundingClientRect().width);
+  if (rightPane.style.flex) {
+    setRightWidth(rightPane.getBoundingClientRect().width);
+  }
+  if (!fileSidebarEl.classList.contains('collapsed') && fileSidebarEl.style.getPropertyValue('--sidebar-width')) {
+    setSidebarWidth(fileSidebarEl.getBoundingClientRect().width);
   }
 });
 
@@ -818,10 +898,6 @@ function toggleSidebar() {
   const collapsed = fileSidebarEl.classList.toggle('collapsed');
   sidebarToggle.textContent = collapsed ? '»' : '«';
   sidebarToggle.title = collapsed ? '展开文件栏' : '折叠文件栏';
-  // 若编辑器已手动调整过宽度，折叠/展开后重新约束
-  if (editorPane.style.flex) {
-    setEditorWidth(editorPane.getBoundingClientRect().width);
-  }
 }
 
 sidebarToggle.addEventListener('click', (e) => {
