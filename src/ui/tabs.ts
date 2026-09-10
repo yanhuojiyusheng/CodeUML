@@ -19,11 +19,15 @@ export interface TabsController {
   readonly activeTabId: string | null;
   getActive(): SourceTab | undefined;
   create(name: string, content: string, folder?: string): SourceTab;
+  /** 批量添加文件（拖入文件夹）：只重绘一次，避免大量文件卡顿 */
+  addTabs(items: { name: string; content: string; folder: string }[]): SourceTab[];
   createFolder(path: string): void;
   switchTo(id: string): void;
   close(id: string): void;
   /** 把编辑器当前内容写回活动标签 */
   syncActiveContent(): void;
+  /** 折叠 / 展开所有文件夹 */
+  toggleAllFolders(): void;
   render(): void;
 }
 
@@ -110,6 +114,26 @@ export function createTabsController(opts: {
     manualFolders.forEach(ensure);
     tabs.forEach(t => ensure(t.folder).files.push(t));
     return root;
+  }
+
+  /** 所有文件夹路径（含子级） */
+  function allFolderPaths(): string[] {
+    const out: string[] = [];
+    const walk = (node: FolderNode) => {
+      for (const child of node.folders.values()) {
+        out.push(child.path);
+        walk(child);
+      }
+    };
+    walk(buildTree());
+    return out;
+  }
+
+  /** 折叠 / 展开所有文件夹：有折叠的就全部展开，否则全部折叠 */
+  function toggleAllFolders() {
+    if (collapsed.size > 0) collapsed.clear();
+    else allFolderPaths().forEach(p => collapsed.add(p));
+    render();
   }
 
   /** 展开某路径的所有祖先文件夹（新建内容后保证可见） */
@@ -362,6 +386,23 @@ export function createTabsController(opts: {
     return tab;
   }
 
+  /** 批量添加文件：追加后只渲染一次并通知一次 */
+  function addTabs(items: { name: string; content: string; folder: string }[]): SourceTab[] {
+    const added = items.map(it => ({
+      id: generateId(),
+      folder: it.folder,
+      name: it.name.slice(0, MAX_FILE_NAME_LENGTH),
+      content: it.content,
+    }));
+    added.forEach(t => {
+      tabs.push(t);
+      expandAncestors(t.folder);
+    });
+    render();
+    onChange();
+    return added;
+  }
+
   /** 新建（空）文件夹：作为当前文件夹的子文件夹 */
   function createFolder(name: string) {
     const segment = name.trim().replace(/^\/+|\/+$/g, '');
@@ -400,10 +441,12 @@ export function createTabsController(opts: {
     get activeTabId() { return activeTabId; },
     getActive,
     create,
+    addTabs,
     createFolder,
     switchTo,
     close,
     syncActiveContent,
+    toggleAllFolders,
     render,
   };
 }

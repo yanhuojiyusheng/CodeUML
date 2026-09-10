@@ -25,6 +25,7 @@ const editorPane = byId<HTMLDivElement>('editor-pane');
 const fileTabsEl = byId<HTMLDivElement>('file-tabs');
 const fileSidebarEl = byId<HTMLDivElement>('file-sidebar');
 const sidebarToggle = byId<HTMLButtonElement>('sidebar-toggle');
+const foldToggleBtn = byId<HTMLButtonElement>('fold-toggle');
 const sidebarResizer = byId<HTMLDivElement>('sidebar-resizer');
 const rightPane = byId<HTMLDivElement>('right-pane');
 const dividerEl = byId<HTMLDivElement>('divider');
@@ -81,10 +82,17 @@ function updateAll() {
   }
 }
 
+// 解析去抖：连续变更（如批量拖入文件）只触发一次全量解析
+let updateTimer: number | undefined;
+function scheduleUpdate() {
+  clearTimeout(updateTimer);
+  updateTimer = window.setTimeout(updateAll, 250);
+}
+
 const tabsController = createTabsController({
   codeEl,
   fileTabsEl,
-  onChange: () => updateAll(),
+  onChange: scheduleUpdate,
 });
 
 const exportActions = createExportActions({
@@ -93,6 +101,8 @@ const exportActions = createExportActions({
 });
 
 // ---------------- 顶部控件 ----------------
+foldToggleBtn.addEventListener('click', () => tabsController.toggleAllFolders());
+
 relationModeBtn.addEventListener('click', () => {
   relationMode = (relationMode + 1) % RELATION_MODES.length;
   relationModeBtn.textContent = `关系: ${RELATION_MODES[relationMode].label}`;
@@ -162,42 +172,56 @@ editorPane.addEventListener('drop', async (e) => {
     if (entry) entries.push(entry);
   }
 
+  // 边读取边分块加入：读到的先显示，不阻塞后续读取
+  const CHUNK = 25;
+  const buffer: { name: string; content: string; folder: string }[] = [];
+  let firstId: string | undefined;
+  const flush = () => {
+    if (!buffer.length) return;
+    const added = tabsController.addTabs(buffer.splice(0));
+    if (!firstId) firstId = added[0]?.id;
+  };
+
   if (entries.length) {
-    const found: { path: string; content: string }[] = [];
-    for (const entry of entries) await collectTsFiles(entry, found);
-    found.forEach(f => {
-      const { folder, name } = splitTsPath(f.path);
-      tabsController.create(name, f.content, folder);
-    });
-    return;
+    for (const entry of entries) {
+      await collectTsFiles(entry, (path, content) => {
+        const { folder, name } = splitTsPath(path);
+        buffer.push({ name, content, folder });
+        if (buffer.length >= CHUNK) flush();
+      });
+    }
+  } else {
+    // 回退：普通文件列表（无 entry API 的浏览器）
+    for (const file of Array.from(dt.files)) {
+      if (!/\.tsx?$/.test(file.name)) {
+        console.warn(`跳过非 TypeScript 文件: ${file.name}`);
+        continue;
+      }
+      buffer.push({ name: file.name.replace(/\.tsx?$/, ''), content: await file.text(), folder: '' });
+      if (buffer.length >= CHUNK) flush();
+    }
   }
 
-  // 回退：普通文件列表
-  Array.from(dt.files).forEach(file => {
-    if (!/\.tsx?$/.test(file.name)) {
-      console.warn(`跳过非 TypeScript 文件: ${file.name}`);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      tabsController.create(file.name.replace(/\.tsx?$/, ''), event.target?.result as string);
-    };
-    reader.readAsText(file);
-  });
+  flush();
+  if (firstId) tabsController.switchTo(firstId);
 });
 
-/** 递归收集拖入文件夹中的 .ts/.tsx 文件 */
-async function collectTsFiles(entry: FileSystemEntry, out: { path: string; content: string }[]): Promise<void> {
+/** 拖入时忽略的目录 */
+const SKIP_DIRS = new Set(['dist', 'node_modules']);
+
+/** 递归收集拖入文件夹中的 .ts/.tsx（每读到一个就回调，边读边加；跳过 dist / node_modules） */
+async function collectTsFiles(entry: FileSystemEntry, onFile: (path: string, content: string) => void): Promise<void> {
   if (entry.isFile) {
     const file = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject));
     if (/\.tsx?$/.test(file.name)) {
-      out.push({ path: entry.fullPath.replace(/^\//, ''), content: await file.text() });
+      onFile(entry.fullPath.replace(/^\//, ''), await file.text());
     }
     return;
   }
   if (entry.isDirectory) {
+    if (SKIP_DIRS.has(entry.name)) return; // 整个目录跳过
     for (const child of await readAllEntries((entry as FileSystemDirectoryEntry).createReader())) {
-      await collectTsFiles(child, out);
+      await collectTsFiles(child, onFile);
     }
   }
 }
@@ -222,11 +246,7 @@ function splitTsPath(p: string): { folder: string; name: string } {
 }
 
 // ---------------- 代码输入 ----------------
-let timer: number;
-codeEl.addEventListener('input', () => {
-  clearTimeout(timer);
-  timer = window.setTimeout(updateAll, 300);
-});
+codeEl.addEventListener('input', scheduleUpdate);
 
 // ---------------- 分栏拖拽 ----------------
 createSplitPanes({

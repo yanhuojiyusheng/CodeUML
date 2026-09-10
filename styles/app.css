@@ -18,8 +18,9 @@ main{flex:1;display:flex;overflow:hidden}
 #file-sidebar.resizing{transition:none}
 #sidebar-header{display:flex;align-items:center;justify-content:flex-end;padding:4px;flex:0 0 auto}
 #file-sidebar.collapsed #sidebar-header{justify-content:center;padding:4px 0}
-#sidebar-toggle{background:none;border:none;color:#666;font-size:14px;cursor:pointer;padding:4px 8px;border-radius:3px}
-#sidebar-toggle:hover{background:#e0e0e0;color:#000}
+#sidebar-toggle,#fold-toggle{background:none;border:none;color:#666;font-size:14px;cursor:pointer;padding:4px 8px;border-radius:3px}
+#sidebar-toggle:hover,#fold-toggle:hover{background:#e0e0e0;color:#000}
+#file-sidebar.collapsed #fold-toggle{display:none}
 #file-sidebar.collapsed #file-tabs{display:none}
 #sidebar-resizer{width:5px;cursor:col-resize;background:#e0e0e0;flex:none;transition:background .15s}
 #sidebar-resizer:hover,#sidebar-resizer.dragging{background:#0078d4}
