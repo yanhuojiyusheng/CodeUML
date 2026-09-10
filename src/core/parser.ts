@@ -127,13 +127,6 @@ function isOptionalType(typeText: string): boolean {
   return typeText.includes('null') || typeText.includes('undefined');
 }
 
-// 计算多重性
-function getMultiplicity(typeText: string): string {
-  if (isArrayType(typeText)) return '*';
-  if (isOptionalType(typeText)) return '0..1';
-  return '1';
-}
-
 // 基本类型列表（扩充）
 const BASIC_TYPES = new Set([
   'string', 'number', 'boolean', 'any', 'void', 'never', 'unknown', 'object',
@@ -177,26 +170,6 @@ function extractUserTypes(typeText: string, knownTypes: Set<string>, excluded?: 
     }
   }
   return [...new Set(result)];
-}
-
-// 从参数中提取所有用户类型
-function extractTypesFromParams(params: string, knownTypes: Set<string>): Set<string> {
-  const types = new Set<string>();
-  if (!params) return types;
-  
-  // 简单的参数类型提取
-  const paramParts = params.split(',');
-  for (const part of paramParts) {
-    const typeMatch = part.match(/:\s*([^=]+)/);
-    if (typeMatch) {
-      const typeStr = typeMatch[1].trim();
-      const typeName = cleanTypeName(typeStr);
-      if (typeName && isUserType(typeName, knownTypes)) {
-        types.add(typeName);
-      }
-    }
-  }
-  return types;
 }
 
 export function parseCode(code: string): ParsedData {

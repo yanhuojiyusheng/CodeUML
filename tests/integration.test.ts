@@ -2,14 +2,11 @@
  * 集成测试 - 验证整体代码正确性
  */
 
-const ts = require('typescript');
-(global as any).ts = ts;
-
-import { parseCode } from '../src/parser';
-import { layoutDiagram } from '../src/layout';
-import { renderSVG } from '../src/renderer';
-import { generateDrawioXML } from '../src/exporter';
-import { ParsedData, Diagram } from '../src/types';
+import { parseCode } from '../src/core/parser';
+import { layoutDiagram } from '../src/core/layout';
+import { renderSVG } from '../src/core/svg';
+import { generateDrawioXML } from '../src/core/drawio';
+import { ParsedData, Diagram } from '../src/core/types';
 
 // 完整的处理流程
 function processCode(code: string): { parsed: ParsedData; diagram: Diagram; svg: string; xml: string } {
@@ -221,6 +218,23 @@ describe('集成测试 - 完整流程', () => {
       
       expect(xml).toContain('*');
     });
+
+    test('导出的 XML 属性值必须转义（否则不是良构 XML）', () => {
+      const { xml } = processCode(`class Foo { x: string; m(): void {} }`);
+      // value 属性内部不允许出现裸 '<'
+      expect(xml).not.toMatch(/value="[^"]*</);
+      expect(xml).toContain('&lt;p&gt;');
+    });
+
+    test('mxCell id 必须唯一且不与根节点冲突', () => {
+      const { xml } = processCode(`class A {} class B {} class C extends A {}`);
+      const ids = [...xml.matchAll(/<mxCell id="(\d+)"/g)].map(m => m[1]);
+      expect(new Set(ids).size).toBe(ids.length);          // 无重复
+      expect(ids).toContain('0');
+      expect(ids).toContain('1');
+      const businessIds = ids.map(Number).filter(n => n > 1);
+      expect(Math.min(...businessIds)).toBe(2);             // 业务节点从 2 开始
+    });
   });
 
   // --------------------------------------------------------
@@ -342,7 +356,7 @@ describe('集成测试 - 完整流程', () => {
   describe('7. 常量配置', () => {
     
     test('LAYOUT 常量应该正确导出', async () => {
-      const { LAYOUT } = await import('../src/utils');
+      const { LAYOUT } = await import('../src/core/utils');
       
       expect(LAYOUT.PAD_X).toBe(140);
       expect(LAYOUT.PAD_Y).toBe(180);
@@ -351,7 +365,7 @@ describe('集成测试 - 完整流程', () => {
     });
 
     test('textWidth 函数应该正常工作', async () => {
-      const { textWidth } = await import('../src/utils');
+      const { textWidth } = await import('../src/core/utils');
       
       const width = textWidth('test');
       expect(width).toBeGreaterThan(0);

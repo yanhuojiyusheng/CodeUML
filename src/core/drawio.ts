@@ -1,6 +1,6 @@
 /** Draw.io XML 导出器 */
 
-import { Box, Diagram, DrawioCell } from './types';
+import { Box, Diagram, DrawioCell, Relation } from './types';
 import { esc, LAYOUT } from './utils';
 
 function getDrawioArrowStyle(type: string): string {
@@ -20,6 +20,7 @@ function getDrawioArrowStyle(type: string): string {
   }
 }
 
+/** 类框的 HTML label（先按 HTML 转义，写 XML 时再整体做属性转义） */
 function buildBoxLabel(b: Box): string {
   const titleLines = b.lines.filter(l => l.cls === 'stereotype');
   const titleText = b.lines.find(l => l.cls === 'title');
@@ -42,52 +43,52 @@ function buildBoxLabel(b: Box): string {
   return label;
 }
 
+/** 关系边标签：字段名 + 两端多重性 */
+function buildEdgeLabel(r: Relation): string {
+  const parts: string[] = [];
+  if (r.label) parts.push(r.label);
+  if (r.fromMultiplicity && r.fromMultiplicity !== '1') parts.push(r.fromMultiplicity);
+  if (r.toMultiplicity && r.toMultiplicity !== '1') parts.push(r.toMultiplicity);
+  return parts.join(' ');
+}
+
 export function generateDrawioXML(diagram: Diagram): string {
   const { boxes, lines } = diagram;
   const { SCALE, PAD } = LAYOUT.EXPORTER;
 
-  let cells: DrawioCell[] = [];
-  let id = 1;
+  const cells: DrawioCell[] = [];
+  // 根节点固定占用 id 0 与 1，业务节点从 2 开始，避免 id 冲突
+  const nameToId = new Map<string, number>();
+  let id = 2;
 
   boxes.forEach(b => {
+    const boxId = id++;
+    nameToId.set(b.name, boxId);
     cells.push({
-      id,
+      id: boxId,
       value: buildBoxLabel(b),
       style: 'swimlane;fontStyle=1;align=center;startSize=26;html=1;',
       vertex: 1,
       x: b.x * SCALE + PAD,
       y: b.y * SCALE + PAD,
       w: b.w * SCALE,
-      h: b.h * SCALE
+      h: b.h * SCALE,
     });
-    id++;
   });
 
-  const nameMap: Record<string, Box> = {};
-  boxes.forEach(b => nameMap[b.name] = b);
-
   lines.forEach(r => {
-    const from = nameMap[r.from];
-    const to = nameMap[r.to];
-    if (!from || !to) return;
-
-    const fromId = boxes.indexOf(from) + 1;
-    const toId = boxes.indexOf(to) + 1;
-
-    let label = '';
-    if (r.fromMultiplicity && r.fromMultiplicity !== '1') label = r.fromMultiplicity;
-    if (r.toMultiplicity && r.toMultiplicity !== '1') label = (label ? label + '..' : '') + r.toMultiplicity;
-    if (r.label) label = label ? r.label + ' ' + label : r.label;
+    const source = nameToId.get(r.from);
+    const target = nameToId.get(r.to);
+    if (source === undefined || target === undefined) return;
 
     cells.push({
-      id,
-      value: label,
+      id: id++,
+      value: buildEdgeLabel(r),
       style: getDrawioArrowStyle(r.type),
       edge: 1,
-      source: fromId,
-      target: toId
+      source,
+      target,
     });
-    id++;
   });
 
   let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
@@ -95,11 +96,19 @@ export function generateDrawioXML(diagram: Diagram): string {
   xml += '<mxCell id="0"/><mxCell id="1" parent="0"/>';
 
   cells.forEach(c => {
-    const extra = c.vertex ? ` x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}"` : '';
-    const parent = c.edge ? '' : ' parent="1"';
-    xml += `<mxCell id="${c.id}" value="${c.value}" style="${c.style}"${c.vertex ? ' vertex="1"' : ''}${c.edge ? ' edge="1"' : ''}${parent}${extra}`;
-    if (c.source) xml += ` source="${c.source}" target="${c.target}"`;
-    xml += '/>';
+    const attrs: string[] = [
+      `id="${c.id}"`,
+      `value="${esc(c.value)}"`,
+      `style="${esc(c.style)}"`,
+      'parent="1"',
+    ];
+    if (c.vertex) {
+      attrs.push('vertex="1"', `x="${c.x}"`, `y="${c.y}"`, `width="${c.w}"`, `height="${c.h}"`);
+    }
+    if (c.edge) {
+      attrs.push('edge="1"', `source="${c.source}"`, `target="${c.target}"`);
+    }
+    xml += `<mxCell ${attrs.join(' ')}/>`;
   });
 
   xml += '</root></mxGraphModel></diagram></mxfile>';

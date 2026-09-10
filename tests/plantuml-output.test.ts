@@ -7,13 +7,10 @@
  * 本文件直接测试生产代码的 PlantUML 文本输出。
  */
 
-const ts = require('typescript');
-(global as any).ts = ts;
-
-import { parseCode } from '../src/parser';
-import { parseFilesWithCrossFileTypes, mergeParsedData } from '../src/merge';
-import { formatParsed, formatMergedPlantUML, formatRelation, formatMember } from '../src/plantuml';
-import { Relation, Member } from '../src/types';
+import { parseCode } from '../src/core/parser';
+import { parseFilesWithCrossFileTypes, mergeParsedData } from '../src/core/merge';
+import { formatParsed, formatMergedPlantUML, formatRelation, formatMember } from '../src/core/plantuml';
+import { Relation, Member } from '../src/core/types';
 import { validatePlantUML } from './helpers/plantuml-validator';
 
 // ============================================================

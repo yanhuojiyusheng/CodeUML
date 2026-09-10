@@ -27,51 +27,80 @@ npm install
 npm run dev    # 监听模式，自动编译
 ```
 
-### 构建
+### 启动网页服务
 
 ```bash
-npm run build  # 编译到 dist/bundle.js
+npm start      # 构建并启动服务器，自动打开浏览器
 ```
+
+默认地址 `http://localhost:3000`（可用 `PORT` 环境变量修改）。
+零依赖，使用 Node 内置 `http` 提供静态文件服务。
 
 ### 使用
 
-直接在浏览器中打开 `index.html` 即可使用。
-
 1. 左侧粘贴代码
 2. 右侧实时显示 UML 类图
-3. 点击标签切换：图表 / Draw.io XML / 解析结果
+3. 点击标签切换：图表 / Draw.io XML / PlantUML
+
+> 也可不用服务器，直接用浏览器打开 `index.html`（需先 `npm run build`）。
 
 ## 项目结构
 
 ```
 codeuml/
-├── index.html              # 入口页面
-├── package.json            # 依赖配置
-├── tsconfig.json           # TypeScript 配置
-├── .gitignore
+├── server.js               # 静态文件服务器（零依赖，启动后打开浏览器）
+├── index.html              # 页面骨架（引入 styles/app.css 与 dist/bundle.js）
+├── styles/
+│   └── app.css             # 页面样式
+├── src/
+│   ├── main.ts             # 入口：组装 core 能力与 ui 交互，启动应用
+│   │
+│   ├── core/               # 纯逻辑层（零 DOM，可独立测试）
+│   │   ├── types.ts        # 核心类型定义
+│   │   ├── utils.ts        # 转义 / 文本宽度 / LAYOUT 常量
+│   │   ├── members.ts      # 成员筛选（布局与渲染共用）
+│   │   ├── parser.ts       # 代码解析器
+│   │   ├── layout.ts       # 分层布局引擎
+│   │   ├── merge.ts        # 多文件合并 / 跨文件类型感知
+│   │   ├── relations.ts    # 关系强弱分级与显示模式
+│   │   ├── svg.ts          # SVG 渲染器
+│   │   ├── drawio.ts       # Draw.io XML 导出器
+│   │   └── plantuml.ts     # PlantUML 文本生成
+│   │
+│   └── ui/                 # DOM 交互层
+│       ├── dom.ts          # 元素获取 / HTML 转义
+│       ├── samples.ts      # 默认示例代码
+│       ├── highlight.ts    # 类图高亮
+│       ├── tabs.ts         # 文件标签管理
+│       ├── panes.ts        # 分栏拖拽
+│       └── actions.ts      # 导出动作
 │
-├── src/                    # 源代码
-│   ├── types.ts            # 类型定义
-│   ├── parser.ts           # 代码解析器
-│   ├── layout.ts           # 分层布局引擎
-│   ├── renderer.ts         # SVG 渲染器
-│   ├── exporter.ts         # Draw.io XML 导出器
-│   └── main.ts             # 主入口
-│
-└── dist/                   # 构建输出
-    └── bundle.js           # 打包后的 JS
+├── tests/                  # 测试
+└── dist/                   # 构建输出（bundle.js）
 ```
 
 ### 核心模块
 
 | 模块 | 职责 |
 |------|------|
-| `types.ts` | 定义 ClassInfo、Relation、Box、Line 等核心类型 |
-| `parser.ts` | 解析代码，提取类/接口/关系 |
-| `layout.ts` | 分层布局算法，按继承关系组织类的位置 |
-| `renderer.ts` | 将布局结果渲染为 SVG，绘制类框和关系箭头 |
-| `exporter.ts` | 生成 Draw.io 兼容的 mxfile XML 格式 |
-| `main.ts` | 事件绑定、视图切换、导出功能 |
+| `core/parser.ts` | 解析代码，提取类/接口/关系 |
+| `core/layout.ts` | 分层布局算法，按继承关系组织类的位置 |
+| `core/svg.ts` | 将布局结果渲染为 SVG，绘制类框和关系箭头 |
+| `core/drawio.ts` | 生成 Draw.io 兼容的 mxfile XML 格式 |
+| `core/plantuml.ts` | 生成 PlantUML 文本 |
+| `core/members.ts` | 成员筛选规则（布局算高度与渲染画内容共用，保证一致） |
+| `ui/*` | DOM 事件绑定、文件标签、分栏、导出等交互 |
+| `main.ts` | 组装与启动 |
+
+### 开发命令
+
+```bash
+npm run dev            # 监听构建
+npm run build          # 打包到 dist/bundle.js
+npm test               # 运行测试（默认不收集覆盖率）
+npm run test:coverage  # 运行测试并生成覆盖率报告
+npm run typecheck      # 类型检查
+```
 
 ## 支持的 UML 关系
 

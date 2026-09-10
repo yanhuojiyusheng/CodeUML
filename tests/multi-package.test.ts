@@ -13,14 +13,11 @@
  * 5. 布局集成（包框、包内排序）
  */
 
-const ts = require('typescript');
-(global as any).ts = ts;
-
-import { parseFilesWithCrossFileTypes, mergeParsedData, SourceFile } from '../src/merge';
-import { formatMergedPlantUML } from '../src/plantuml';
-import { layoutDiagram } from '../src/layout';
-import { generateDrawioXML } from '../src/exporter';
-import { ParsedData, Relation } from '../src/types';
+import { parseFilesWithCrossFileTypes, mergeParsedData, SourceFile } from '../src/core/merge';
+import { formatMergedPlantUML } from '../src/core/plantuml';
+import { layoutDiagram } from '../src/core/layout';
+import { generateDrawioXML } from '../src/core/drawio';
+import { ParsedData, Relation } from '../src/core/types';
 import { validatePlantUML } from './helpers/plantuml-validator';
 
 // ============================================================

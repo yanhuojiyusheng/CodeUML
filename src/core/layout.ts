@@ -1,7 +1,8 @@
 /** 布局引擎 - 优化的空间布局 */
 
-import { ParsedData, Box, Line, Diagram, ClassInfo, PackageBox, Member } from './types';
+import { ParsedData, Box, Line, Diagram, ClassInfo, PackageBox } from './types';
 import { memberText, textWidth, LAYOUT } from './utils';
+import { selectVisibleProperties, selectVisibleMethods } from './members';
 
 // 显示配置（与 renderer 同步）
 export const LAYOUT_CONFIG = {
@@ -11,37 +12,6 @@ export const LAYOUT_CONFIG = {
 
 export function setLayoutConfig(config: Partial<typeof LAYOUT_CONFIG>) {
   Object.assign(LAYOUT_CONFIG, config);
-}
-
-/** 筛选后的成员数量（用于计算框高度） */
-function getDisplayCount(members: Member[], maxCount: number, isProp: boolean): { count: number; hasMore: boolean } {
-  if (members.length <= maxCount) {
-    return { count: members.length, hasMore: false };
-  }
-  
-  let filtered: Member[];
-  
-  if (isProp) {
-    // 属性：优先必需属性，不够则补充可选属性
-    const required = members.filter(m => !m.name.includes('?'));
-    if (required.length >= maxCount) {
-      filtered = required.slice(0, maxCount);
-    } else {
-      const optional = members.filter(m => m.name.includes('?'));
-      filtered = [...required, ...optional].slice(0, maxCount);
-    }
-  } else {
-    // 方法：优先公共和静态，不够则补充其他
-    const important = members.filter(m => m.isStatic || m.modifier === '+');
-    if (important.length >= maxCount) {
-      filtered = important.slice(0, maxCount);
-    } else {
-      const remaining = members.filter(m => !m.isStatic && m.modifier !== '+');
-      filtered = [...important, ...remaining].slice(0, maxCount);
-    }
-  }
-  
-  return { count: filtered.length, hasMore: members.length > filtered.length };
 }
 
 // 布局配置
@@ -80,9 +50,11 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     const props = c.members.filter(m => m.kind === 'property');
     const meths = c.members.filter(m => m.kind === 'method');
     
-    // 计算显示数量
-    const { count: displayProps, hasMore: hasMoreProps } = getDisplayCount(props, LAYOUT_CONFIG.MAX_PROPS, true);
-    const { count: displayMeths, hasMore: hasMoreMeths } = getDisplayCount(meths, LAYOUT_CONFIG.MAX_METHODS, false);
+    // 计算显示数量（与渲染器共用同一套筛选规则）
+    const { filtered: visibleProps, hasMore: hasMoreProps } = selectVisibleProperties(props, LAYOUT_CONFIG.MAX_PROPS);
+    const { filtered: visibleMeths, hasMore: hasMoreMeths } = selectVisibleMethods(meths, LAYOUT_CONFIG.MAX_METHODS);
+    const displayProps = visibleProps.length;
+    const displayMeths = visibleMeths.length;
     
     const stereotypeH = c.isInterface || c.isAbstract ? 16 : 0;
     const titleH = 26;

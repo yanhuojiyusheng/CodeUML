@@ -52,10 +52,3 @@ export function textWidth(s: string): number {
 export function relationKey(r: { from: string; type: string; to: string }): string {
   return `${r.from}|${r.type}|${r.to}`;
 }
-
-/** 安全获取 DOM 元素 */
-export function getElement<T extends HTMLElement>(id: string): T {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`Element #${id} not found`);
-  return el as T;
-}

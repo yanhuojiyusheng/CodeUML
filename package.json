@@ -4,15 +4,20 @@
   "description": "TypeScript to UML Class Diagram Converter",
   "main": "src/main.ts",
   "scripts": {
+    "start": "npm run build && node server.js",
+    "serve": "node server.js",
     "build": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --target=es2020",
     "dev": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --target=es2020 --watch",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch"
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
+    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "esbuild": "^0.20.0",
     "jest": "^30.5.1",
-    "ts-jest": "^29.4.12"
+    "ts-jest": "^29.4.12",
+    "typescript": "^6.0.3"
   }
 }
