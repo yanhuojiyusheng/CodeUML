@@ -1,9 +1,61 @@
-/** SVG 渲染器 - 支持包分组 */
+/** SVG 渲染器 - 支持包分组和成员筛选 */
 
-import { Box, Diagram, Line, PackageBox } from './types';
+import { Box, Diagram, Line, Member, PackageBox } from './types';
 import { esc, memberText, LAYOUT } from './utils';
 
 const { ARROW } = LAYOUT;
+
+// 显示配置（可由外部调整）
+export const DISPLAY_CONFIG = {
+  MAX_PROPS: 8,       // 属性最大显示数量
+  MAX_METHODS: 8,     // 方法最大显示数量
+  TRUNCATE_THRESHOLD: 10, // 超过此数量触发筛选
+};
+
+/** 设置显示配置 */
+export function setDisplayConfig(config: Partial<typeof DISPLAY_CONFIG>) {
+  Object.assign(DISPLAY_CONFIG, config);
+}
+
+/** 筛选重要成员 */
+function filterImportantMembers(members: Member[], maxCount: number): { filtered: Member[], hasMore: boolean } {
+  if (members.length <= maxCount) {
+    return { filtered: members, hasMore: false };
+  }
+  
+  // 第一轮：只保留公共和静态成员
+  const important = members.filter(m => m.isStatic || m.modifier === '+');
+  
+  // 如果筛选后足够，返回
+  if (important.length >= maxCount) {
+    return { filtered: important.slice(0, maxCount), hasMore: true };
+  }
+  
+  // 如果不够，补充其他成员直到达到上限
+  const remaining = members.filter(m => !m.isStatic && m.modifier !== '+');
+  const combined = [...important, ...remaining].slice(0, maxCount);
+  return { filtered: combined, hasMore: members.length > maxCount };
+}
+
+/** 筛选属性（跳过可选属性，但确保显示数量） */
+function filterProperties(props: Member[], maxCount: number): { filtered: Member[], hasMore: boolean } {
+  if (props.length <= maxCount) {
+    return { filtered: props, hasMore: false };
+  }
+  
+  // 第一轮：跳过带 ? 的可选属性
+  const required = props.filter(p => !p.name.includes('?'));
+  
+  // 如果必需属性足够
+  if (required.length >= maxCount) {
+    return { filtered: required.slice(0, maxCount), hasMore: true };
+  }
+  
+  // 如果不够，补充可选属性直到达到上限
+  const optional = props.filter(p => p.name.includes('?'));
+  const combined = [...required, ...optional].slice(0, maxCount);
+  return { filtered: combined, hasMore: props.length > maxCount };
+}
 
 function renderRelation(r: Line): string {
   const dx = r.tx - r.fx, dy = r.ty - r.fy;
@@ -72,8 +124,8 @@ function renderRelation(r: Line): string {
 
 /** 截断文本，超长显示... */
 function truncateText(text: string, maxWidth: number, fontSize: number = 12): string {
-  const charWidth = fontSize * 0.6; // 近似字符宽度
-  const maxChars = Math.floor((maxWidth - 16) / charWidth); // 减去左右 padding
+  const charWidth = fontSize * 0.6;
+  const maxChars = Math.floor((maxWidth - 16) / charWidth);
   
   if (text.length <= maxChars) return esc(text);
   if (maxChars <= 3) return esc(text.substring(0, 1)) + '...';
@@ -83,7 +135,13 @@ function truncateText(text: string, maxWidth: number, fontSize: number = 12): st
 function renderBox(b: Box): string {
   const LH = LAYOUT.LINE_H;
   const SEP = 1;
-  const propsH = b.props.length * LH || LH;
+  
+  // 筛选成员
+  const { filtered: filteredProps, hasMore: hasMoreProps } = filterProperties(b.props, DISPLAY_CONFIG.MAX_PROPS);
+  const { filtered: filteredMeths, hasMore: hasMoreMeths } = filterImportantMembers(b.meths, DISPLAY_CONFIG.MAX_METHODS);
+  
+  const propsH = (filteredProps.length + (hasMoreProps ? 1 : 0)) * LH || LH;
+  const methsH = (filteredMeths.length + (hasMoreMeths ? 1 : 0)) * LH || LH;
 
   let svg = `<g class="class-box" transform="translate(${b.x},${b.y})">`;
   svg += `<rect width="${b.w}" height="${b.h}" fill="#fff" stroke="#333" stroke-width="1.5" rx="2"/>`;
@@ -104,20 +162,31 @@ function renderBox(b: Box): string {
   svg += `<line class="sep" x1="0" y1="${y}" x2="${b.w}" y2="${y}"/>`;
   y += SEP;
 
-  b.props.forEach((p, i) => {
+  // 属性
+  filteredProps.forEach((p, i) => {
     const text = memberText(p);
     const truncated = truncateText(text, b.w - 8, 12);
-    svg += `<text x="8" y="${y + 12 + i * LH}" fill="#333" clip-path="url(#clip-${b.name})">${truncated}</text>`;
+    svg += `<text x="8" y="${y + 12 + i * LH}" fill="#333">${truncated}</text>`;
   });
+  
+  if (hasMoreProps) {
+    svg += `<text x="8" y="${y + 12 + filteredProps.length * LH}" fill="#999" font-style="italic">... (${b.props.length - filteredProps.length} more)</text>`;
+  }
+  
   y += propsH + SEP;
   svg += `<line class="sep" x1="0" y1="${y}" x2="${b.w}" y2="${y}"/>`;
   y += SEP;
 
-  b.meths.forEach((m, i) => {
+  // 方法
+  filteredMeths.forEach((m, i) => {
     const text = memberText(m);
     const truncated = truncateText(text, b.w - 8, 12);
-    svg += `<text x="8" y="${y + 12 + i * LH}" fill="#333" clip-path="url(#clip-${b.name})">${truncated}</text>`;
+    svg += `<text x="8" y="${y + 12 + i * LH}" fill="#333">${truncated}</text>`;
   });
+  
+  if (hasMoreMeths) {
+    svg += `<text x="8" y="${y + 12 + filteredMeths.length * LH}" fill="#999" font-style="italic">... (${b.meths.length - filteredMeths.length} more)</text>`;
+  }
 
   svg += '</g>';
   return svg;

@@ -1,7 +1,48 @@
 /** 布局引擎 - 优化的空间布局 */
 
-import { ParsedData, Box, Line, Diagram, ClassInfo, PackageBox } from './types';
+import { ParsedData, Box, Line, Diagram, ClassInfo, PackageBox, Member } from './types';
 import { memberText, textWidth, LAYOUT } from './utils';
+
+// 显示配置（与 renderer 同步）
+export const LAYOUT_CONFIG = {
+  MAX_PROPS: 8,
+  MAX_METHODS: 8,
+};
+
+export function setLayoutConfig(config: Partial<typeof LAYOUT_CONFIG>) {
+  Object.assign(LAYOUT_CONFIG, config);
+}
+
+/** 筛选后的成员数量（用于计算框高度） */
+function getDisplayCount(members: Member[], maxCount: number, isProp: boolean): { count: number; hasMore: boolean } {
+  if (members.length <= maxCount) {
+    return { count: members.length, hasMore: false };
+  }
+  
+  let filtered: Member[];
+  
+  if (isProp) {
+    // 属性：优先必需属性，不够则补充可选属性
+    const required = members.filter(m => !m.name.includes('?'));
+    if (required.length >= maxCount) {
+      filtered = required.slice(0, maxCount);
+    } else {
+      const optional = members.filter(m => m.name.includes('?'));
+      filtered = [...required, ...optional].slice(0, maxCount);
+    }
+  } else {
+    // 方法：优先公共和静态，不够则补充其他
+    const important = members.filter(m => m.isStatic || m.modifier === '+');
+    if (important.length >= maxCount) {
+      filtered = important.slice(0, maxCount);
+    } else {
+      const remaining = members.filter(m => !m.isStatic && m.modifier !== '+');
+      filtered = [...important, ...remaining].slice(0, maxCount);
+    }
+  }
+  
+  return { count: filtered.length, hasMore: members.length > filtered.length };
+}
 
 // 布局配置
 const CONFIG = {
@@ -33,16 +74,20 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     }
   });
 
-  // 2. 计算类框尺寸
+  // 2. 计算类框尺寸（考虑显示限制）
   const boxMap: Record<string, Box> = {};
   classes.forEach(c => {
     const props = c.members.filter(m => m.kind === 'property');
     const meths = c.members.filter(m => m.kind === 'method');
     
+    // 计算显示数量
+    const { count: displayProps, hasMore: hasMoreProps } = getDisplayCount(props, LAYOUT_CONFIG.MAX_PROPS, true);
+    const { count: displayMeths, hasMore: hasMoreMeths } = getDisplayCount(meths, LAYOUT_CONFIG.MAX_METHODS, false);
+    
     const stereotypeH = c.isInterface || c.isAbstract ? 16 : 0;
     const titleH = 26;
-    const propsH = Math.max(props.length, 1) * LAYOUT.LINE_H;
-    const methsH = Math.max(meths.length, 1) * LAYOUT.LINE_H;
+    const propsH = Math.max(displayProps + (hasMoreProps ? 1 : 0), 1) * LAYOUT.LINE_H;
+    const methsH = Math.max(displayMeths + (hasMoreMeths ? 1 : 0), 1) * LAYOUT.LINE_H;
     const h = stereotypeH + titleH + 1 + propsH + 1 + methsH + 8;
 
     const lines = [
@@ -51,9 +96,13 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
       { text: c.name, cls: 'title' }
     ];
 
+    // 计算最大宽度
     let maxW = textWidth(c.name);
-    props.forEach(p => { maxW = Math.max(maxW, textWidth(memberText(p))); });
-    meths.forEach(m => { maxW = Math.max(maxW, textWidth(memberText(m))); });
+    props.slice(0, displayProps).forEach(p => { maxW = Math.max(maxW, textWidth(memberText(p))); });
+    meths.slice(0, displayMeths).forEach(m => { maxW = Math.max(maxW, textWidth(memberText(m))); });
+    if (hasMoreProps || hasMoreMeths) {
+      maxW = Math.max(maxW, textWidth('... (N more)'));
+    }
     const w = Math.max(CONFIG.MIN_BOX_WIDTH, Math.min(CONFIG.MAX_BOX_WIDTH, maxW + 30));
 
     boxMap[c.name] = { ...c, x: 0, y: 0, w, h, lines, props, meths };

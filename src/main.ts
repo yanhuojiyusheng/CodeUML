@@ -1,8 +1,8 @@
 /** 主入口 */
 
 import { parseCode, parseCodeWithKnownTypes } from './parser';
-import { layoutDiagram } from './layout';
-import { renderSVG } from './renderer';
+import { layoutDiagram, setLayoutConfig } from './layout';
+import { renderSVG, setDisplayConfig } from './renderer';
 import { generateDrawioXML } from './exporter';
 import { Diagram, ParsedData, Member, ClassInfo, Relation } from './types';
 import { getElement } from './utils';
@@ -15,6 +15,22 @@ const parsedOutputEl = getElement<HTMLTextAreaElement>('parsed-output');
 const statusEl = getElement<HTMLDivElement>('status');
 const editorPane = getElement<HTMLDivElement>('editor-pane');
 const fileTabsEl = getElement<HTMLDivElement>('file-tabs');
+const maxPropsEl = getElement<HTMLInputElement>('max-props');
+const maxMethodsEl = getElement<HTMLInputElement>('max-methods');
+
+// 初始化显示配置
+maxPropsEl.addEventListener('change', () => {
+  const val = parseInt(maxPropsEl.value) || 8;
+  setDisplayConfig({ MAX_PROPS: val });
+  setLayoutConfig({ MAX_PROPS: val });
+  updateAll();
+});
+maxMethodsEl.addEventListener('change', () => {
+  const val = parseInt(maxMethodsEl.value) || 8;
+  setDisplayConfig({ MAX_METHODS: val });
+  setLayoutConfig({ MAX_METHODS: val });
+  updateAll();
+});
 
 // 文件管理
 interface FileTab {
