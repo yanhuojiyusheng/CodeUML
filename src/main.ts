@@ -446,7 +446,7 @@ function startRename(tabId: string, nameEl: HTMLElement) {
   const input = document.createElement('input');
   input.type = 'text';
   input.value = tab.name;
-  input.style.cssText = 'background:#1e1e1e;color:#fff;border:1px solid #0078d4;padding:2px 6px;font-size:12px;width:100px;outline:none;';
+  input.style.cssText = 'background:#1e1e1e;color:#fff;border:1px solid #0078d4;padding:2px 6px;font-size:12px;flex:1;min-width:0;width:100%;box-sizing:border-box;outline:none;';
   
   nameEl.replaceWith(input);
   input.focus();
