@@ -16,6 +16,9 @@ const parsedOutputEl = getElement<HTMLTextAreaElement>('parsed-output');
 const statusEl = getElement<HTMLDivElement>('status');
 const editorPane = getElement<HTMLDivElement>('editor-pane');
 const fileTabsEl = getElement<HTMLDivElement>('file-tabs');
+const fileSidebarEl = getElement<HTMLDivElement>('file-sidebar');
+const sidebarToggle = getElement<HTMLButtonElement>('sidebar-toggle');
+const dividerEl = getElement<HTMLDivElement>('divider');
 const maxPropsEl = getElement<HTMLInputElement>('max-props');
 const maxMethodsEl = getElement<HTMLInputElement>('max-methods');
 const relationModeBtn = getElement<HTMLButtonElement>('relation-mode-btn');
@@ -75,6 +78,7 @@ interface FileTab {
 
 let tabs: FileTab[] = [];
 let activeTabId: string | null = null;
+let pendingSwitchTimer: number | undefined;
 
 // 默认示例代码
 const DEFAULT_CODE = `// 领域模型与设计模式示例 - models.ts
@@ -365,11 +369,27 @@ function createTab(name: string, content: string): FileTab {
   return tab;
 }
 
+/** 延迟切换标签，避免干扰双击重命名 */
+function scheduleSwitch(tabId: string) {
+  if (pendingSwitchTimer) {
+    clearTimeout(pendingSwitchTimer);
+  }
+  pendingSwitchTimer = window.setTimeout(() => {
+    pendingSwitchTimer = undefined;
+    switchTab(tabId);
+  }, 200);
+}
+
 /** 渲染标签栏 */
 function renderTabs() {
+  if (pendingSwitchTimer) {
+    clearTimeout(pendingSwitchTimer);
+    pendingSwitchTimer = undefined;
+  }
+
   let html = tabs.map(tab => `
     <div class="file-tab ${tab.id === activeTabId ? 'active' : ''}" data-id="${tab.id}">
-      <span class="name" data-id="${tab.id}" title="双击重命名">${escHtml(tab.name)}</span>
+      <span class="name" data-id="${tab.id}" title="${escAttr(tab.name)}（双击重命名）">${escHtml(tab.name)}</span>
       <span class="close" data-id="${tab.id}">×</span>
     </div>
   `).join('');
@@ -381,11 +401,30 @@ function renderTabs() {
   
   fileTabsEl.querySelectorAll('.file-tab:not(.add-tab)').forEach(el => {
     el.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      if (target.classList.contains('close')) {
-        closeTab(target.dataset.id!);
-      } else if (!target.classList.contains('name')) {
-        switchTab(el.getAttribute('data-id')!);
+      const me = e as MouseEvent;
+      const target = me.target as HTMLElement;
+      const closeBtn = target.closest('.close') as HTMLElement | null;
+      if (closeBtn) {
+        closeTab(closeBtn.dataset.id!);
+        return;
+      }
+      const tabId = el.getAttribute('data-id')!;
+      const nameEl = target.closest('.name') as HTMLElement | null;
+      const isActive = el.classList.contains('active');
+      
+      if (me.detail === 2 && nameEl) {
+        // 双击文件名 -> 重命名，并取消延迟切换
+        if (pendingSwitchTimer) {
+          clearTimeout(pendingSwitchTimer);
+          pendingSwitchTimer = undefined;
+        }
+        startRename(tabId, nameEl);
+        return;
+      }
+      
+      // 当前标签单击无需切换；非当前标签延迟切换
+      if (!isActive) {
+        scheduleSwitch(tabId);
       }
     });
   });
@@ -394,15 +433,6 @@ function renderTabs() {
   document.getElementById('add-tab')?.addEventListener('click', () => {
     const count = tabs.length + 1;
     createTab(`file${count}`, '// 新文件\n');
-  });
-  
-  // 双击重命名
-  fileTabsEl.querySelectorAll('.file-tab .name').forEach(el => {
-    el.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      const tabId = el.getAttribute('data-id')!;
-      startRename(tabId, el as HTMLElement);
-    });
   });
 }
 
@@ -478,6 +508,11 @@ function closeTab(id: string) {
 /** HTML 转义 */
 function escHtml(s: string): string {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** HTML 属性转义 */
+function escAttr(s: string): string {
+  return escHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 /** 合并所有文件的解析结果（跨文件类型感知） */
@@ -701,6 +736,104 @@ let timer: number;
 codeEl.addEventListener('input', () => {
   clearTimeout(timer);
   timer = window.setTimeout(updateAll, 300);
+});
+
+// 左右分栏拖动调整
+let dividerDragging = false;
+let dividerStartX = 0;
+let dividerStartWidth = 0;
+
+function setEditorWidth(width: number) {
+  const mainEl = editorPane.parentElement;
+  if (!mainEl) return;
+  const sidebarW = fileSidebarEl.getBoundingClientRect().width || 170;
+  const dividerW = dividerEl.getBoundingClientRect().width || 6;
+  const mainW = mainEl.getBoundingClientRect().width || window.innerWidth;
+  const maxW = Math.max(280, mainW - sidebarW - dividerW - 280); // 右侧至少保留 280px
+  const minW = 240;
+  const clamped = Math.max(minW, Math.min(maxW, width));
+  editorPane.style.flex = `0 0 ${clamped}px`;
+  editorPane.style.width = `${clamped}px`;
+}
+
+dividerEl.addEventListener('mousedown', (e: MouseEvent) => {
+  e.preventDefault();
+  dividerDragging = true;
+  dividerStartX = e.clientX;
+  dividerStartWidth = editorPane.getBoundingClientRect().width;
+  dividerEl.classList.add('dragging');
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+});
+
+document.addEventListener('mousemove', (e: MouseEvent) => {
+  if (!dividerDragging) return;
+  setEditorWidth(dividerStartWidth + (e.clientX - dividerStartX));
+});
+
+document.addEventListener('mouseup', () => {
+  if (!dividerDragging) return;
+  dividerDragging = false;
+  dividerEl.classList.remove('dragging');
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+});
+
+// 触摸设备支持
+let touchDragging = false;
+let touchStartX = 0;
+let touchStartWidth = 0;
+
+dividerEl.addEventListener('touchstart', (e: TouchEvent) => {
+  const touch = e.touches[0];
+  if (!touch) return;
+  touchDragging = true;
+  touchStartX = touch.clientX;
+  touchStartWidth = editorPane.getBoundingClientRect().width;
+  dividerEl.classList.add('dragging');
+}, { passive: true });
+
+dividerEl.addEventListener('touchmove', (e: TouchEvent) => {
+  if (!touchDragging) return;
+  const touch = e.touches[0];
+  if (!touch) return;
+  setEditorWidth(touchStartWidth + (touch.clientX - touchStartX));
+  e.preventDefault();
+}, { passive: false });
+
+dividerEl.addEventListener('touchend', () => {
+  touchDragging = false;
+  dividerEl.classList.remove('dragging');
+});
+
+// 窗口缩放时，若已拖动过则重新约束编辑器宽度
+window.addEventListener('resize', () => {
+  if (editorPane.style.flex) {
+    setEditorWidth(editorPane.getBoundingClientRect().width);
+  }
+});
+
+// 文件栏折叠/展开
+function toggleSidebar() {
+  const collapsed = fileSidebarEl.classList.toggle('collapsed');
+  sidebarToggle.textContent = collapsed ? '»' : '«';
+  sidebarToggle.title = collapsed ? '展开文件栏' : '折叠文件栏';
+  // 若编辑器已手动调整过宽度，折叠/展开后重新约束
+  if (editorPane.style.flex) {
+    setEditorWidth(editorPane.getBoundingClientRect().width);
+  }
+}
+
+sidebarToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleSidebar();
+});
+
+// 折叠状态下点击整条竖栏可展开
+fileSidebarEl.addEventListener('click', () => {
+  if (fileSidebarEl.classList.contains('collapsed')) {
+    toggleSidebar();
+  }
 });
 
 // 初始化 - 加载示例
