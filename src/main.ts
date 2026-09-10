@@ -9,7 +9,7 @@ import { RELATION_MODES, filterRelationsByMode } from './core/relations';
 import { ParsedData } from './core/types';
 
 import { byId } from './ui/dom';
-import { createTabsController } from './ui/tabs';
+import { createTabsController, packageName } from './ui/tabs';
 import { createHighlighter } from './ui/highlight';
 import { createSplitPanes } from './ui/panes';
 import { createExportActions } from './ui/actions';
@@ -56,7 +56,7 @@ createPan(diagramEl);
 function mergeAllParsed(): Map<string, ParsedData> {
   tabsController.syncActiveContent();
   return parseFilesWithCrossFileTypes(
-    tabsController.tabs.map(tab => ({ name: tab.name, content: tab.content }))
+    tabsController.tabs.map(tab => ({ name: packageName(tab), content: tab.content }))
   );
 }
 
@@ -147,28 +147,79 @@ editorPane.addEventListener('dragleave', () => {
   editorPane.classList.remove('drag-over');
 });
 
-editorPane.addEventListener('drop', (e) => {
+editorPane.addEventListener('drop', async (e) => {
   e.preventDefault();
   editorPane.classList.remove('drag-over');
 
-  const files = e.dataTransfer?.files;
-  if (!files?.length) return;
+  const dt = e.dataTransfer;
+  if (!dt) return;
 
-  Array.from(files).forEach(file => {
-    if (!file.name.endsWith('.ts') && !file.name.endsWith('.tsx')) {
+  // 优先用 entry API，这样拖入整个文件夹也能读取
+  const entries: FileSystemEntry[] = [];
+  for (const item of Array.from(dt.items || [])) {
+    if (item.kind !== 'file') continue;
+    const entry = item.webkitGetAsEntry?.();
+    if (entry) entries.push(entry);
+  }
+
+  if (entries.length) {
+    const found: { path: string; content: string }[] = [];
+    for (const entry of entries) await collectTsFiles(entry, found);
+    found.forEach(f => {
+      const { folder, name } = splitTsPath(f.path);
+      tabsController.create(name, f.content, folder);
+    });
+    return;
+  }
+
+  // 回退：普通文件列表
+  Array.from(dt.files).forEach(file => {
+    if (!/\.tsx?$/.test(file.name)) {
       console.warn(`跳过非 TypeScript 文件: ${file.name}`);
       return;
     }
-
     const reader = new FileReader();
     reader.onload = (event) => {
-      const content = event.target?.result as string;
-      const packageName = file.name.replace(/\.tsx?$/, '');
-      tabsController.create(packageName, content);
+      tabsController.create(file.name.replace(/\.tsx?$/, ''), event.target?.result as string);
     };
     reader.readAsText(file);
   });
 });
+
+/** 递归收集拖入文件夹中的 .ts/.tsx 文件 */
+async function collectTsFiles(entry: FileSystemEntry, out: { path: string; content: string }[]): Promise<void> {
+  if (entry.isFile) {
+    const file = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject));
+    if (/\.tsx?$/.test(file.name)) {
+      out.push({ path: entry.fullPath.replace(/^\//, ''), content: await file.text() });
+    }
+    return;
+  }
+  if (entry.isDirectory) {
+    for (const child of await readAllEntries((entry as FileSystemDirectoryEntry).createReader())) {
+      await collectTsFiles(child, out);
+    }
+  }
+}
+
+function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+  return new Promise((resolve, reject) => {
+    const all: FileSystemEntry[] = [];
+    const next = () => reader.readEntries(batch => {
+      if (!batch.length) return resolve(all);
+      all.push(...batch);
+      next();
+    }, reject);
+    next();
+  });
+}
+
+/** 'src/models/user.ts' -> { folder: 'src/models', name: 'user' } */
+function splitTsPath(p: string): { folder: string; name: string } {
+  const parts = p.split('/');
+  const name = (parts.pop() || 'untitled').replace(/\.tsx?$/, '');
+  return { folder: parts.join('/'), name };
+}
 
 // ---------------- 代码输入 ----------------
 let timer: number;
