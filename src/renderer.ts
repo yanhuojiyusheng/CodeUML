@@ -70,6 +70,16 @@ function renderRelation(r: Line): string {
   return svg;
 }
 
+/** 截断文本，超长显示... */
+function truncateText(text: string, maxWidth: number, fontSize: number = 12): string {
+  const charWidth = fontSize * 0.6; // 近似字符宽度
+  const maxChars = Math.floor((maxWidth - 16) / charWidth); // 减去左右 padding
+  
+  if (text.length <= maxChars) return esc(text);
+  if (maxChars <= 3) return esc(text.substring(0, 1)) + '...';
+  return esc(text.substring(0, maxChars - 3)) + '...';
+}
+
 function renderBox(b: Box): string {
   const LH = LAYOUT.LINE_H;
   const SEP = 1;
@@ -95,14 +105,18 @@ function renderBox(b: Box): string {
   y += SEP;
 
   b.props.forEach((p, i) => {
-    svg += `<text x="8" y="${y + 12 + i * LH}" fill="#333">${esc(memberText(p))}</text>`;
+    const text = memberText(p);
+    const truncated = truncateText(text, b.w - 8, 12);
+    svg += `<text x="8" y="${y + 12 + i * LH}" fill="#333" clip-path="url(#clip-${b.name})">${truncated}</text>`;
   });
   y += propsH + SEP;
   svg += `<line class="sep" x1="0" y1="${y}" x2="${b.w}" y2="${y}"/>`;
   y += SEP;
 
   b.meths.forEach((m, i) => {
-    svg += `<text x="8" y="${y + 12 + i * LH}" fill="#333">${esc(memberText(m))}</text>`;
+    const text = memberText(m);
+    const truncated = truncateText(text, b.w - 8, 12);
+    svg += `<text x="8" y="${y + 12 + i * LH}" fill="#333" clip-path="url(#clip-${b.name})">${truncated}</text>`;
   });
 
   svg += '</g>';
