@@ -36,9 +36,11 @@ export function esc(s: string): string {
 export function memberText(m: Member): string {
   const staticStr = m.isStatic ? '{static} ' : '';
   const abstractStr = m.isAbstract ? '{abstract} ' : '';
+  // readonly 只对属性有意义
+  const readonlyStr = m.isReadonly && m.kind === 'property' ? '{readonly} ' : '';
   
   if (m.kind === 'property') {
-    return `${staticStr}${abstractStr}${m.modifier} ${m.name}${m.type ? ': ' + m.type : ''}`;
+    return `${staticStr}${abstractStr}${readonlyStr}${m.modifier} ${m.name}${m.type ? ': ' + m.type : ''}`;
   }
   return `${staticStr}${abstractStr}${m.modifier} ${m.name}(${m.params || ''})${m.type ? ': ' + m.type : ''}`;
 }

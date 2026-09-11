@@ -55,7 +55,7 @@ export function validatePlantUML(text: string): string[] {
 
     if (stack[stack.length - 1] === 'class') {
       if (line === '--') continue; // 属性/方法分隔符
-      if (/^(\{(static|abstract)\}\s+)*[+#~-]\s+/.test(line)) {
+      if (/^(\{(static|abstract|readonly)\}\s+)*[+#~-]\s+/.test(line)) {
         // 括号平衡检查
         let depth = 0;
         for (const ch of line) {

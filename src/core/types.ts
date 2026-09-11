@@ -8,6 +8,7 @@ export interface Member {
   params?: string;
   isStatic?: boolean;
   isAbstract?: boolean;
+  isReadonly?: boolean;
 }
 
 export interface ClassInfo {

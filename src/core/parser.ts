@@ -433,7 +433,8 @@ export function parseCodeWithKnownTypes(
             kind: 'property',
             modifier: '+',
             name: m.name.getText(sf) + opt,
-            type: m.type?.getText(sf) || ''
+            type: m.type?.getText(sf) || '',
+            isReadonly: !!(ts.getCombinedModifierFlags(m) & ts.ModifierFlags.Readonly)
           });
         } else if (ts.isMethodSignature(m)) {
           const params = m.parameters.map((p: any) => p.getText(sf)).join(', ');
@@ -451,7 +452,8 @@ export function parseCodeWithKnownTypes(
             kind: 'property',
             modifier: '+',
             name: `[${key ? key.getText(sf) : 'key: string'}]`,
-            type: m.type?.getText(sf) || ''
+            type: m.type?.getText(sf) || '',
+            isReadonly: !!(ts.getCombinedModifierFlags(m) & ts.ModifierFlags.Readonly)
           });
         } else if (ts.isCallSignatureDeclaration(m) || ts.isConstructSignatureDeclaration(m)) {
           // (x: T): R  /  new (x: T): R
@@ -515,7 +517,8 @@ export function parseCodeWithKnownTypes(
             name: m.name.getText(sf) + opt,
             type: typeStr,
             isStatic,
-            isAbstract: isAbstractMember
+            isAbstract: isAbstractMember,
+            isReadonly: !!(ts.getCombinedModifierFlags(m) & ts.ModifierFlags.Readonly)
           });
         } else if (ts.isConstructorDeclaration(m)) {
           const params: string[] = [];
@@ -542,7 +545,8 @@ export function parseCodeWithKnownTypes(
                 modifier: pMod,
                 name: p.name.getText(sf),
                 type: pType,
-                isStatic: false
+                isStatic: false,
+                isReadonly: !!hasReadonlyKeyword
               });
             }
           });

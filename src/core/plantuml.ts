@@ -11,13 +11,15 @@ function safeQuoted(name: string): string {
 export function formatMember(m: Member): string {
   const staticStr = m.isStatic ? '{static} ' : '';
   const abstractStr = m.isAbstract ? '{abstract} ' : '';
+  // readonly 只对属性有意义
+  const readonlyStr = m.isReadonly && m.kind === 'property' ? '{readonly} ' : '';
 
   if (m.kind === 'property') {
     // 枚举值：type 为 "= 值" 形式（PlantUML 枚举成员语法：NAME = 值）
     if (m.type.startsWith('= ')) {
-      return `${staticStr}${abstractStr}${m.modifier} ${m.name} ${m.type}`;
+      return `${staticStr}${abstractStr}${readonlyStr}${m.modifier} ${m.name} ${m.type}`;
     }
-    return `${staticStr}${abstractStr}${m.modifier} ${m.name}${m.type ? ' : ' + m.type : ''}`;
+    return `${staticStr}${abstractStr}${readonlyStr}${m.modifier} ${m.name}${m.type ? ' : ' + m.type : ''}`;
   }
   if (m.name === 'constructor') {
     return `${m.modifier} constructor(${m.params || ''})`;

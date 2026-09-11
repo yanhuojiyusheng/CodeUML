@@ -31,7 +31,8 @@ function buildBoxLabel(b: Box): string {
   label += '<hr size="1"/>';
 
   b.props.forEach(p => {
-    label += `<p>${esc(p.modifier)} ${esc(p.name)}${p.type ? ': ' + esc(p.type) : ''}</p>`;
+    const marker = p.isReadonly ? '{readonly} ' : '';
+    label += `<p>${marker}${esc(p.modifier)} ${esc(p.name)}${p.type ? ': ' + esc(p.type) : ''}</p>`;
   });
   label += '<hr size="1"/>';
 
