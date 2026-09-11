@@ -96,6 +96,31 @@ describe('警告指纹 warningSignature', () => {
   });
 });
 
+describe('语义解析不可用的提示', () => {
+  const input = { ...empty, resolutionError: 'boom' };
+
+  test('计入问题类（带 ⚠，默认展开）', () => {
+    expect(hasProblems(input)).toBe(true);
+    expect(defaultCollapsedSections(input).has('resolution')).toBe(false);
+  });
+
+  test('摘要里出现', () => {
+    expect(formatWarningSummary(input)).toContain('语义解析不可用');
+  });
+
+  test('明细里出现，且排在其它分类之前', () => {
+    const html = formatWarnings({ ...allThree, resolutionError: 'boom' });
+    expect(html).toContain('data-section="resolution"');
+    expect(html).toContain('语义解析不可用');
+    expect(html).toContain('boom');
+    expect(html.indexOf('语义解析不可用')).toBeLessThan(html.indexOf('解析失败'));
+  });
+
+  test('没有该错误时不出现', () => {
+    expect(formatWarnings(allThree)).not.toContain('语义解析不可用');
+  });
+});
+
 describe('警告明细 formatWarnings：分类与折叠', () => {
   test('无警告时返回空字符串', () => {
     expect(formatWarnings(empty)).toBe('');

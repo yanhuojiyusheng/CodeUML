@@ -151,7 +151,12 @@ function updateAll() {
     const report: ParseReport = { failures: [], duplicates: [], ambiguous: [] };
     const allParsed = mergeAllParsed(report);
     const { merged, classPackageMap } = mergeParsedData(allParsed);
-    renderWarnings({ failures: report.failures, duplicates: report.duplicates, ambiguous: report.ambiguous });
+    renderWarnings({
+      resolutionError: report.resolutionError,
+      failures: report.failures,
+      duplicates: report.duplicates,
+      ambiguous: report.ambiguous,
+    });
 
     const diagram = layoutDiagram(merged);
 

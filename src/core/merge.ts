@@ -23,6 +23,8 @@ export interface ParseReport {
   duplicates: { name: string; packages: string[] }[];
   /** 无法确定目标的引用（没提供 import），已连接到全部候选。file 是出现该引用的文件 */
   ambiguous: { file: string; from: string; to: string; candidates: string[] }[];
+  /** 语义解析整块不可用（模块解析失败）时的原因；会让跨文件引用退化为歧义 */
+  resolutionError?: string;
 }
 
 /** 解析结果：每个包的类与关系（类名在重名时已加包限定，全局唯一） */
@@ -83,6 +85,7 @@ export function parseFilesWithCrossFileTypes(
 
   // 语义解析（best-effort，失败时返回空映射，后面会回退）
   const resolution = resolveTypes(files, configs);
+  if (resolution.error && report) report.resolutionError = resolution.error;
 
   // 第一步：收集所有文件的类型名称、类型别名、import 绑定名
   const allTypeNames = new Set<string>();

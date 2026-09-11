@@ -9,6 +9,8 @@
 import { escHtml } from './dom';
 
 export interface WarningInput {
+  /** 语义解析整块不可用（模块解析失败）——会让跨文件引用退化为歧义 */
+  resolutionError?: string;
   /** 解析失败的文件（语法错误 / 解析异常） */
   failures: { name: string; message: string }[];
   /** 跨包同名类（已按包区分，仍提示用户） */
@@ -18,14 +20,14 @@ export interface WarningInput {
 }
 
 /** 警告分类的 key（与 DOM 上的 data-section 对应） */
-export type WarningSectionKey = 'failures' | 'ambiguous' | 'duplicates';
+export type WarningSectionKey = 'resolution' | 'failures' | 'ambiguous' | 'duplicates';
 
 const hasWarnings = (w: WarningInput) =>
-  w.failures.length > 0 || w.duplicates.length > 0 || w.ambiguous.length > 0;
+  Boolean(w.resolutionError) || w.failures.length > 0 || w.duplicates.length > 0 || w.ambiguous.length > 0;
 
-/** 是否需要用户处理（解析失败 / 歧义引用）。重名只是告知，不算问题。 */
+/** 是否需要用户处理（语义解析不可用 / 解析失败 / 歧义引用）。重名只是告知。 */
 export function hasProblems(w: WarningInput): boolean {
-  return w.failures.length > 0 || w.ambiguous.length > 0;
+  return Boolean(w.resolutionError) || w.failures.length > 0 || w.ambiguous.length > 0;
 }
 
 /** 各分类的默认折叠状态：⚠ 问题展开，ℹ 提示（重名）收起 */
@@ -43,6 +45,7 @@ export function defaultCollapsedSections(w: WarningInput): Set<WarningSectionKey
  */
 export function formatWarningSummary(w: WarningInput): string {
   const problems: string[] = [];
+  if (w.resolutionError) problems.push('语义解析不可用');
   if (w.failures.length > 0) problems.push(`${w.failures.length} 个文件解析失败`);
   if (w.ambiguous.length > 0) problems.push(`${w.ambiguous.length} 处歧义引用`);
 
@@ -94,6 +97,12 @@ export function formatWarnings(
       '</div>',
     );
   };
+
+  if (w.resolutionError) {
+    section('resolution', 'problem', '语义解析不可用（跨文件引用会退化为歧义）',
+      [`<code>${escHtml(w.resolutionError)}</code>`],
+    );
+  }
 
   if (w.failures.length > 0) {
     section('failures', 'problem', '解析失败（其余文件已正常解析）',

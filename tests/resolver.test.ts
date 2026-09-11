@@ -389,4 +389,21 @@ describe('tsconfig paths（按引用方就近匹配）', () => {
     expect(merged.classes.find(c => c.name === rel!.to)?.packageName).toBe('packages/shared/src/types.ts');
     expect(report.ambiguous).toEqual([]);
   });
+
+  test('tsconfig 用精确 paths 指向构建产物时，仍能回退到 package.json 推导的源码入口', () => {
+    const report = emptyReport();
+    const merged = buildWithConfigs([
+      { name: 'packages/chord/src/index.ts', content: 'export * from "./types.ts";' },
+      { name: 'packages/chord/src/types.ts', content: 'export interface Context { chord: string; }' },
+      { name: 'packages/ai/src/types.ts', content: 'export interface Context { ai: string; }' },
+      { name: 'packages/agent/src/harness/env/nodejs.ts', content: 'import type { Context } from "@earendil-works/chord";\nexport interface NodeTextLineReader { ctx: Context; }' },
+    ], report, [
+      { name: 'packages/chord/package.json', content: JSON.stringify({ name: '@earendil-works/chord' }) },
+      { name: 'tsconfig.json', content: JSON.stringify({ compilerOptions: { baseUrl: '.', paths: { '@earendil-works/chord': ['packages/chord/dist/index.d.ts'] } } }) },
+    ]);
+    const rel = merged.relations.find(r => r.from === 'NodeTextLineReader');
+    expect(rel).toBeDefined();
+    expect(merged.classes.find(c => c.name === rel!.to)?.packageName).toBe('packages/chord/src/types.ts');
+    expect(report.ambiguous).toEqual([]);
+  });
 });

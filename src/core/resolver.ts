@@ -28,6 +28,8 @@ export interface ResolvedType {
 export interface TypeResolution {
   /** 虚拟文件名 -> (文件里用到的类型名 -> 实际声明) */
   byFile: Map<string, Map<string, ResolvedType>>;
+  /** 整块语义解析不可用时的原因（会让跨文件引用退化为歧义），仅用于提示用户 */
+  error?: string;
 }
 
 const EMPTY: TypeResolution = { byFile: new Map() };
@@ -273,10 +275,17 @@ export function resolveTypes(files: SourceFile[], configs: ConfigFile[] = []): T
       const dir = dirname(containingFile);
       const hit = tsconfigs.find(c => c.dir === '' || dir === c.dir || dir.startsWith(c.dir + '/'));
       if (!hit?.paths) return null;
-      return { baseUrl: '/', paths: { ...packagePaths, ...hit.paths } };
+      // 合并而不是覆盖：tsconfig 的目标排在前（项目本意），package.json 推导的源码入口
+      // 追加在后面当兜底——tsconfig 指向构建产物（不在拖入的源码集里）时仍能找到源码
+      const merged: Record<string, string[]> = {};
+      for (const [pattern, targets] of Object.entries(packagePaths)) merged[pattern] = [...targets];
+      for (const [pattern, targets] of Object.entries(hit.paths)) {
+        merged[pattern] = [...targets, ...(merged[pattern] ?? [])];
+      }
+      return { baseUrl: '/', paths: merged };
     };
 
-    const host = {
+    const baseHost: any = {
       getSourceFile: (fileName: string) => {
         const text = contents.get(fileName);
         if (text === undefined) return undefined;
@@ -290,15 +299,37 @@ export function resolveTypes(files: SourceFile[], configs: ConfigFile[] = []): T
       getNewLine: () => '\n',
       fileExists: (f: string) => contents.has(f),
       readFile: (f: string) => contents.get(f),
-      // 让每个文件用它自己就近的 tsconfig paths，而不是全局一套
-      resolveModuleNames: (moduleNames: string[], containingFile: string) => {
-        const per = pathsFor(containingFile);
-        const opts = per ? { ...options, ...per } : options;
-        return moduleNames.map(n => ts.resolveModuleName(n, containingFile, opts, host).resolvedModule);
-      },
     };
 
-    const program = ts.createProgram(roots, options, host);
+    /** 带 per-file tsconfig paths 的 host（只用到 tsconfig 时才装这个钩子） */
+    const hostWithPaths = (): any => {
+      const host: any = { ...baseHost };
+      host.resolveModuleNames = (moduleNames: string[], containingFile: string) =>
+        moduleNames.map((n: string) => {
+          try {
+            const per = pathsFor(containingFile);
+            const opts = per ? { ...options, ...per } : options;
+            return ts.resolveModuleName(n, containingFile, opts, host).resolvedModule;
+          } catch {
+            // 单个模块名解析异常不应带倒整个 Program
+            return undefined;
+          }
+        });
+      return host;
+    };
+
+    // 构建 Program。有 tsconfig 时带 paths 钩子；失败则逐级降级，
+    // 绝不因为 tsconfig 的问题把整块语义解析搞没（那样所有 import 都会失败）
+    let program: any;
+    if (tsconfigs.length > 0) {
+      try {
+        program = ts.createProgram(roots, options, hostWithPaths());
+      } catch {
+        program = ts.createProgram(roots, options, baseHost);
+      }
+    } else {
+      program = ts.createProgram(roots, options, baseHost);
+    }
     const checker = program.getTypeChecker();
     const byFile = new Map<string, Map<string, ResolvedType>>();
 
@@ -354,7 +385,8 @@ export function resolveTypes(files: SourceFile[], configs: ConfigFile[] = []): T
     }
 
     return { byFile };
-  } catch {
-    return EMPTY;
+  } catch (e) {
+    // 不能静默降级：整块语义解析没了会让跨文件引用退化成“歧义”，必须让用户看到
+    return { byFile: new Map(), error: e instanceof Error ? e.message : String(e) };
   }
 }
