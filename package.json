@@ -1,5 +1,5 @@
 {
-  "name": "tstouml",
+  "name": "codeuml",
   "version": "1.0.0",
   "description": "TypeScript to UML Class Diagram Converter",
   "main": "src/main.ts",
