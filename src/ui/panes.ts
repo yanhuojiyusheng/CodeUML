@@ -86,13 +86,20 @@ export function createSplitPanes(opts: {
   let sidebarStartX = 0;
   let sidebarStartWidth = 0;
 
+  // 编辑区收起前右侧图表区的固定宽度（收起后它变成 flex:1，测得的宽度不再代表它占用的固定空间）
+  let collapsedRightWidth = 0;
+
   function setSidebarWidth(width: number) {
     const mainEl = fileSidebar.parentElement;
     if (!mainEl) return;
     const mainW = mainEl.getBoundingClientRect().width || window.innerWidth;
     const resizerW = sidebarResizer.getBoundingClientRect().width || 5;
     const dividerW = divider.getBoundingClientRect().width || 6;
-    const rightW = rightPane.getBoundingClientRect().width || 0;
+    // 编辑区收起时图表区会吃满剩余空间，若仍按当前测得宽度扣减，maxW 会被算成负数，
+    // 文件栏就被卡死在 180px；这里改用收起前的固定宽度
+    const rightW = editorPane.classList.contains('collapsed')
+      ? collapsedRightWidth
+      : (rightPane.getBoundingClientRect().width || 0);
     // 保证：文件栏 + 编辑器(>=240) + 分隔条 + 右侧面板 不超出主区域
     const maxW = Math.max(180, Math.min(600, mainW - resizerW - dividerW - rightW - 240));
     const minW = 120;
@@ -193,6 +200,7 @@ export function createSplitPanes(opts: {
   let savedRightWidth: { flex: string; width: string } | null = null;
   bindCollapse(editorPane, editorToggle, { expand: '展开编辑区', collapse: '收起编辑区' }, (collapsed) => {
     if (collapsed) {
+      collapsedRightWidth = rightPane.getBoundingClientRect().width || 0;
       savedRightWidth = { flex: rightPane.style.flex, width: rightPane.style.width };
       rightPane.style.flex = '1 1 auto';
       rightPane.style.width = 'auto';
@@ -200,6 +208,8 @@ export function createSplitPanes(opts: {
       rightPane.style.flex = savedRightWidth.flex;
       rightPane.style.width = savedRightWidth.width;
       savedRightWidth = null;
+      // 收起期间文件栏可能被拖宽，展开后按当前布局重新约束图表区，避免溢出
+      setRightWidth(rightPane.getBoundingClientRect().width);
     }
   });
 }
