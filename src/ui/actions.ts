@@ -23,10 +23,11 @@ function downloadFile(name: string, content: string, type: string) {
 }
 
 export function createExportActions(opts: {
-  diagramEl: HTMLElement;
+  /** 纯计算生成当前图表的 SVG（不依赖图表视图是否恰好是最新渲染的） */
+  renderDiagramSVG: () => string;
   mergeAllParsed: () => Map<string, ParsedData>;
 }): ExportActions {
-  const { diagramEl, mergeAllParsed } = opts;
+  const { renderDiagramSVG, mergeAllParsed } = opts;
 
   function exportDrawio() {
     const allParsed = mergeAllParsed();
@@ -36,7 +37,7 @@ export function createExportActions(opts: {
   }
 
   function exportSVG() {
-    downloadFile('class-diagram.svg', `<?xml version="1.0" encoding="UTF-8"?>\n${diagramEl.innerHTML}`, 'image/svg+xml');
+    downloadFile('class-diagram.svg', `<?xml version="1.0" encoding="UTF-8"?>\n${renderDiagramSVG()}`, 'image/svg+xml');
   }
 
   function exportPlantUML() {

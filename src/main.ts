@@ -49,6 +49,17 @@ const zoomResetBtn = byId<HTMLButtonElement>('zoom-reset');
 // ---------------- 状态 ----------------
 let relationMode = 0;
 
+// 视图懒生成：三份输出共用同一次解析/合并/布局，但只有当前选中的视图才序列化
+type ViewKey = 'diagram' | 'xml' | 'parsed';
+let activeView: ViewKey = 'diagram';
+const staleViews = new Set<ViewKey>(['diagram', 'xml', 'parsed']);
+let lastBase: {
+  diagram: ReturnType<typeof layoutDiagram>;
+  displayDiagram: ReturnType<typeof layoutDiagram>;
+  allParsed: ReturnType<typeof mergeAllParsed>;
+  classPackageMap: Map<string, string>;
+} | null = null;
+
 const highlighter = createHighlighter(diagramEl);
 
 const zoom = createZoom({
@@ -162,12 +173,13 @@ function updateAll() {
 
     // 图表显示按当前关系模式过滤，XML/PlantUML 保留全量
     const displayDiagram = { ...diagram, lines: filterRelationsByMode(diagram.lines, relationMode) };
-    diagramEl.innerHTML = renderSVG(displayDiagram, highlighter.relationKey);
-    highlighter.sync(displayDiagram);
-    zoom.apply();
+    lastBase = { diagram, displayDiagram, allParsed, classPackageMap };
 
-    xmlOutputEl.value = generateDrawioXML(diagram);
-    parsedOutputEl.value = formatMergedPlantUML(allParsed, classPackageMap);
+    // 基础数据变了，三份输出都过期；只重算当前视图（切页时会补算）
+    staleViews.add('diagram');
+    staleViews.add('xml');
+    staleViews.add('parsed');
+    renderView(activeView);
   } catch (e: unknown) {
     console.error('解析错误:', e);
   }
@@ -197,7 +209,14 @@ function syncVisibilityButton() {
 }
 
 const exportActions = createExportActions({
-  diagramEl,
+  // 导出走纯计算：不依赖图表视图恰好在最新状态（懒生成下图表可能过期）
+  renderDiagramSVG: () => {
+    const allParsed = mergeAllParsed();
+    const { merged } = mergeParsedData(allParsed);
+    const diagram = layoutDiagram(merged);
+    const display = { ...diagram, lines: filterRelationsByMode(diagram.lines, relationMode) };
+    return renderSVG(display, highlighter.relationKey);
+  },
   mergeAllParsed,
 });
 
@@ -237,15 +256,41 @@ window.exportDrawio = exportActions.exportDrawio;
 window.exportSVG = exportActions.exportSVG;
 window.exportPlantUML = exportActions.exportPlantUML;
 
+// ---------------- 视图懒生成 ----------------
+/** 只渲染指定视图；XML / PlantUML 只有在切到那一页时才序列化 */
+function renderView(view: ViewKey) {
+  const base = lastBase;
+  if (!base) return;
+
+  if (view === 'diagram') {
+    diagramEl.innerHTML = renderSVG(base.displayDiagram, highlighter.relationKey);
+    highlighter.sync(base.displayDiagram);
+    zoom.apply();
+  } else if (view === 'xml') {
+    xmlOutputEl.value = generateDrawioXML(base.diagram);
+  } else {
+    parsedOutputEl.value = formatMergedPlantUML(base.allParsed, base.classPackageMap);
+  }
+  staleViews.delete(view);
+}
+
+/** 切到某个视图；内容过期时才补算 */
+function showView(view: ViewKey) {
+  activeView = view;
+  if (staleViews.has(view)) renderView(view);
+}
+
 // ---------------- 视图标签切换 ----------------
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
 
-    const viewId = tab.getAttribute('data-view') + '-view';
+    const view = tab.getAttribute('data-view') as ViewKey | null;
+    const viewId = `${view}-view`;
     document.querySelectorAll('#diagram-view, #xml-view, #parsed-view').forEach(v => v.classList.remove('active'));
     document.getElementById(viewId)?.classList.add('active');
+    if (view) showView(view);
   });
 });
 
