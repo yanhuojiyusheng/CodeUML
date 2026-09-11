@@ -12,6 +12,7 @@ import { ParsedData } from './core/types';
 import { byId } from './ui/dom';
 import { formatWarnings, formatWarningSummary, warningSignature, hasProblems, defaultCollapsedSections, WarningInput, WarningSectionKey } from './ui/warnings';
 import { createTabsController, packageName } from './ui/tabs';
+import { createUpdateScheduler } from './ui/scheduler';
 import { createHighlighter } from './ui/highlight';
 import { createSplitPanes } from './ui/panes';
 import { createExportActions } from './ui/actions';
@@ -185,11 +186,10 @@ function updateAll() {
   }
 }
 
-// 解析去抖：连续变更（如批量拖入文件）只触发一次全量解析
-let updateTimer: number | undefined;
+// 解析去抖；拖入大量文件时用 suspend/resume 挂起，导入结束只解析一次
+const scheduler = createUpdateScheduler({ run: updateAll, delay: 250 });
 function scheduleUpdate() {
-  clearTimeout(updateTimer);
-  updateTimer = window.setTimeout(updateAll, 250);
+  scheduler.schedule();
 }
 
 const tabsController = createTabsController({
@@ -329,32 +329,40 @@ editorPane.addEventListener('drop', async (e) => {
     if (!firstId) firstId = added[0]?.id;
   };
 
-  if (entries.length) {
-    for (const entry of entries) {
-      await collectTsFiles(entry, (path, content) => {
-        const { folder, name } = splitSourcePath(path);
-        buffer.push({ name, content, folder });
-        if (buffer.length >= CHUNK) flush();
-      });
-    }
-  } else {
-    // 回退：普通文件列表（无 entry API 的浏览器）
-    for (const file of Array.from(dt.files)) {
-      if (/\.tsx?$/.test(file.name)) {
-        // 保留扩展名：语义解析与 .tsx 的 ScriptKind 都依赖它
-        buffer.push({ name: file.name, content: await file.text(), folder: '' });
-      } else if (CONFIG_FILE_RE.test(file.name)) {
-        configFiles.push({ name: file.name, content: await file.text() });
-      } else {
-        console.warn(`跳过不支持的文件: ${file.name}`);
-        continue;
+  // 导入期间挂起解析：每批 flush 都会触发 onChange，而全局类型集合一变就会让解析缓存
+  // 整批失效（实测 1000 个文件 ≈ 40 次全量重解析，累计 1108ms）。挂起后只在导入结束解析一次。
+  scheduler.suspend();
+  try {
+    if (entries.length) {
+      for (const entry of entries) {
+        await collectTsFiles(entry, (path, content) => {
+          const { folder, name } = splitSourcePath(path);
+          buffer.push({ name, content, folder });
+          if (buffer.length >= CHUNK) flush();
+        });
       }
-      if (buffer.length >= CHUNK) flush();
+    } else {
+      // 回退：普通文件列表（无 entry API 的浏览器）
+      for (const file of Array.from(dt.files)) {
+        if (/\.tsx?$/.test(file.name)) {
+          // 保留扩展名：语义解析与 .tsx 的 ScriptKind 都依赖它
+          buffer.push({ name: file.name, content: await file.text(), folder: '' });
+        } else if (CONFIG_FILE_RE.test(file.name)) {
+          configFiles.push({ name: file.name, content: await file.text() });
+        } else {
+          console.warn(`跳过不支持的文件: ${file.name}`);
+          continue;
+        }
+        if (buffer.length >= CHUNK) flush();
+      }
     }
-  }
 
-  flush();
-  if (firstId) tabsController.switchTo(firstId);
+    flush();
+    if (firstId) tabsController.switchTo(firstId);
+  } finally {
+    // 导入结束：只解析一次（resume 会立即跑，不再等去抖）
+    scheduler.resume();
+  }
 });
 
 /** 拖入时忽略的目录 */
