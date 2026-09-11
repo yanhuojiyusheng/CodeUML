@@ -1,5 +1,36 @@
 /** 可拖拽分栏：编辑区/图表区、文件栏宽度 */
 
+// 分栏宽度常量（纯函数与交互代码共用）
+const RESIZER_W = 5;      // #sidebar-resizer
+const DIVIDER_W = 6;      // #divider
+const EDITOR_MIN = 240;   // 编辑区最少保留
+const RIGHT_MIN = 280;    // 图表区最少保留
+const SIDEBAR_MIN = 120;
+const SIDEBAR_MAX = 600;
+const SIDEBAR_FLOOR = 180;
+
+/**
+ * 文件栏宽度上限。
+ * 只接受「右侧面板的固定宽度」——绝不能把 flex 伸缩后测得的宽度传进来，
+ * 否则上限会被算成负数、被兜底值卡死（历史上两次同一个坑）。
+ */
+export function maxSidebarWidth(mainW: number, rightW: number): number {
+  return Math.max(SIDEBAR_FLOOR, Math.min(SIDEBAR_MAX, mainW - RESIZER_W - DIVIDER_W - rightW - EDITOR_MIN));
+}
+
+export function clampSidebarWidth(width: number, mainW: number, rightW: number): number {
+  return Math.max(SIDEBAR_MIN, Math.min(maxSidebarWidth(mainW, rightW), width));
+}
+
+/** 图表区宽度上限（给编辑区留出最小宽度） */
+export function maxRightWidth(mainW: number, sidebarW: number): number {
+  return Math.max(RIGHT_MIN, mainW - sidebarW - RESIZER_W - DIVIDER_W - EDITOR_MIN);
+}
+
+export function clampRightWidth(width: number, mainW: number, sidebarW: number): number {
+  return Math.max(RIGHT_MIN, Math.min(maxRightWidth(mainW, sidebarW), width));
+}
+
 export function createSplitPanes(opts: {
   rightPane: HTMLElement;
   divider: HTMLElement;
@@ -16,18 +47,27 @@ export function createSplitPanes(opts: {
   let dividerStartX = 0;
   let dividerStartWidth = 0;
 
+  // 右侧面板的“固定宽度”；0 表示未手动调整过（用 CSS 默认的 50%）。
+  // 这是唯一事实来源：文件栏上限也用它，避免去测 flex 伸缩后的宽度。
+  let rightPaneWidth = 0;
+
+  function applyRightWidth() {
+    if (rightPaneWidth > 0) {
+      rightPane.style.flex = `0 0 ${rightPaneWidth}px`;
+      rightPane.style.width = `${rightPaneWidth}px`;
+    } else {
+      rightPane.style.flex = '';
+      rightPane.style.width = '';
+    }
+  }
+
   function setRightWidth(width: number) {
     const mainEl = rightPane.parentElement;
     if (!mainEl) return;
-    const sidebarW = fileSidebar.getBoundingClientRect().width || 170;
-    const resizerW = sidebarResizer.getBoundingClientRect().width || 5;
-    const dividerW = divider.getBoundingClientRect().width || 6;
     const mainW = mainEl.getBoundingClientRect().width || window.innerWidth;
-    const maxW = Math.max(280, mainW - sidebarW - resizerW - dividerW - 240); // 编辑器至少保留 240px
-    const minW = 280;
-    const clamped = Math.max(minW, Math.min(maxW, width));
-    rightPane.style.flex = `0 0 ${clamped}px`;
-    rightPane.style.width = `${clamped}px`;
+    const sidebarW = fileSidebar.getBoundingClientRect().width || 170;
+    rightPaneWidth = clampRightWidth(width, mainW, sidebarW);
+    applyRightWidth();
   }
 
   divider.addEventListener('mousedown', (e: MouseEvent) => {
@@ -86,25 +126,14 @@ export function createSplitPanes(opts: {
   let sidebarStartX = 0;
   let sidebarStartWidth = 0;
 
-  // 编辑区收起前右侧图表区的固定宽度（收起后它变成 flex:1，测得的宽度不再代表它占用的固定空间）
-  let collapsedRightWidth = 0;
-
+  // 编辑区收起前右侧图表区的固定宽度就存在 rightPaneWidth 里，这里直接用它，
+  // 不依赖任何“收起那一刻的快照”，所以窗口尺寸变化也不会失效
   function setSidebarWidth(width: number) {
     const mainEl = fileSidebar.parentElement;
     if (!mainEl) return;
     const mainW = mainEl.getBoundingClientRect().width || window.innerWidth;
-    const resizerW = sidebarResizer.getBoundingClientRect().width || 5;
-    const dividerW = divider.getBoundingClientRect().width || 6;
-    // 编辑区收起时图表区会吃满剩余空间，若仍按当前测得宽度扣减，maxW 会被算成负数，
-    // 文件栏就被卡死在 180px；这里改用收起前的固定宽度
-    const rightW = editorPane.classList.contains('collapsed')
-      ? collapsedRightWidth
-      : (rightPane.getBoundingClientRect().width || 0);
-    // 保证：文件栏 + 编辑器(>=240) + 分隔条 + 右侧面板 不超出主区域
-    const maxW = Math.max(180, Math.min(600, mainW - resizerW - dividerW - rightW - 240));
-    const minW = 120;
-    const clamped = Math.max(minW, Math.min(maxW, width));
-    fileSidebar.style.setProperty('--sidebar-width', `${clamped}px`);
+    const rightW = rightPaneWidth > 0 ? rightPaneWidth : mainW * 0.5;
+    fileSidebar.style.setProperty('--sidebar-width', `${clampSidebarWidth(width, mainW, rightW)}px`);
   }
 
   sidebarResizer.addEventListener('mousedown', (e: MouseEvent) => {
@@ -196,18 +225,14 @@ export function createSplitPanes(opts: {
 
   bindCollapse(fileSidebar, sidebarToggle, { expand: '展开文件栏', collapse: '折叠文件栏' });
 
-  // 编辑区收起时把空间让给图表区，展开时恢复原宽度
-  let savedRightWidth: { flex: string; width: string } | null = null;
+  // 编辑区收起时把空间让给图表区，展开时按 rightPaneWidth 恢复
   bindCollapse(editorPane, editorToggle, { expand: '展开编辑区', collapse: '收起编辑区' }, (collapsed) => {
     if (collapsed) {
-      collapsedRightWidth = rightPane.getBoundingClientRect().width || 0;
-      savedRightWidth = { flex: rightPane.style.flex, width: rightPane.style.width };
-      rightPane.style.flex = '1 1 auto';
+      // basis 用 0：若用 auto，基准会变成图表内容宽度，撑爆整行并反过来压缩文件栏
+      rightPane.style.flex = '1 1 0';
       rightPane.style.width = 'auto';
-    } else if (savedRightWidth) {
-      rightPane.style.flex = savedRightWidth.flex;
-      rightPane.style.width = savedRightWidth.width;
-      savedRightWidth = null;
+    } else {
+      applyRightWidth();
       // 收起期间文件栏可能被拖宽，展开后按当前布局重新约束图表区，避免溢出
       setRightWidth(rightPane.getBoundingClientRect().width);
     }
