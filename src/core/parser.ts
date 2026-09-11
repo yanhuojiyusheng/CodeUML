@@ -15,14 +15,34 @@ function scriptKindFor(fileName?: string) {
 }
 
 /** 文件名参与解析，以便根据扩展名选择 ScriptKind */
-function createSourceFile(code: string, fileName?: string) {
-  return ts.createSourceFile(
+// 缓存：SourceFile（供一次解析内的两遍共享）与 TypeInfo（内容未变就直接复用）。
+// 键都是「文件名 + 内容」，命中则免去重新解析。两者都只读，共享是安全的。
+const SF_CACHE_LIMIT = 1000;
+const INFO_CACHE_LIMIT = 5000;
+const sfCache = new Map<string, any>();
+const infoCache = new Map<string, TypeInfo>();
+
+/** FIFO 淘汰一条，避免一次性清空导致大项目反复重建 */
+function evictOldest<K, V>(cache: Map<K, V>, limit: number) {
+  if (cache.size < limit) return;
+  const oldest = cache.keys().next().value;
+  if (oldest !== undefined) cache.delete(oldest);
+}
+
+function createSourceFile(code: string, fileName?: string): any {
+  const key = `${fileName || 'input.ts'}\u0000${code}`;
+  const hit = sfCache.get(key);
+  if (hit) return hit;
+  const sf = ts.createSourceFile(
     fileName || 'input.ts',
     code,
     ts.ScriptTarget.Latest,
     true,
     scriptKindFor(fileName),
   );
+  evictOldest(sfCache, SF_CACHE_LIMIT);
+  sfCache.set(key, sf);
+  return sf;
 }
 
 /** 展平顶层声明：递归进入 namespace / module（含嵌套与点号命名空间） */
@@ -402,7 +422,13 @@ function collectFromSourceFile(sf: any): TypeInfo {
 
 /** 供多文件合并的第一趟使用：先收集全部类型名与别名，再做第二趟解析 */
 export function collectTypeInfo(code: string, fileName?: string): TypeInfo {
-  return collectFromSourceFile(createSourceFile(code, fileName));
+  const key = `${fileName || 'input.ts'}\u0000${code}`;
+  const hit = infoCache.get(key);
+  if (hit) return hit;
+  const info = collectFromSourceFile(createSourceFile(code, fileName));
+  evictOldest(infoCache, INFO_CACHE_LIMIT);
+  infoCache.set(key, info);
+  return info;
 }
 
 /**

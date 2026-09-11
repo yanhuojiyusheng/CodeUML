@@ -44,6 +44,12 @@ interface Resolution {
 /** 别名链的循环保护 */
 const MAX_ALIAS_DEPTH = 8;
 
+/** 语法解析结果缓存上限（FIFO 淘汰） */
+const PARSE_CACHE_LIMIT = 5000;
+
+/** 键为包名；值里带内容与类型集合指纹做校验（指纹很长，不能当键，否则每次查找都要哈希巨大字符串） */
+const parseCache = new Map<string, { content: string; knownSig: string; parsed: ParsedData }>();
+
 function dedupeTargets(targets: Target[]): Target[] {
   const seen = new Set<string>();
   return targets.filter(t => {
@@ -99,25 +105,40 @@ export function parseFilesWithCrossFileTypes(
   });
 
   // 第二步：使用合并的类型集合重新解析每个文件
+  //
+  // 语法解析结果缓存：按包名存，用「内容 + 全局类型集合指纹」校验。
+  // - 内容没变且「声明集合」没变时直接复用，编辑一个文件不必重解析所有文件
+  // - 声明集合变了（指纹变）则失效，跨文件类型感知不会丢
+  // 注意：缓存对象只能读，绝不能就地改（重名加限定、关系重解析都在下面生成新对象）
+  const knownSig = allTypeNames.size + '|' + [...allTypeNames].join('\u0001');
   const results: ParsedFiles = new Map();
   files.forEach(f => {
     try {
-      const parsed = parseCodeWithKnownTypes(f.content, allTypeNames, f.name);
-      parsed.classes.forEach(c => {
-        c.packageName = f.name;
-      });
+      const cached = parseCache.get(f.name);
+      let parsed = cached && cached.content === f.content && cached.knownSig === knownSig
+        ? cached.parsed
+        : undefined;
+      if (!parsed) {
+        parsed = parseCodeWithKnownTypes(f.content, allTypeNames, f.name);
+        parsed.classes.forEach(c => {
+          c.packageName = f.name;
+        });
+        if (parseCache.size >= PARSE_CACHE_LIMIT) {
+          const oldest = parseCache.keys().next().value;
+          if (oldest !== undefined) parseCache.delete(oldest);
+        }
+        parseCache.set(f.name, { content: f.content, knownSig, parsed });
+      }
 
       const existing = results.get(f.name);
       if (existing) {
-        // 同一包名出现多次（同名文件）：合并类（同名去重）与关系
+        // 同一包名出现多次（同名文件）：合并类（同名去重）与关系（生成新对象，不就地改缓存）
         const known = new Set(existing.classes.map(c => c.name));
-        parsed.classes.forEach(c => {
-          if (!known.has(c.name)) {
-            known.add(c.name);
-            existing.classes.push(c);
-          }
+        const extra = parsed.classes.filter(c => !known.has(c.name));
+        results.set(f.name, {
+          classes: [...existing.classes, ...extra],
+          relations: [...existing.relations, ...parsed.relations],
         });
-        existing.relations.push(...parsed.relations);
       } else {
         results.set(f.name, parsed);
       }
@@ -230,32 +251,32 @@ export function parseFilesWithCrossFileTypes(
     return { targets: classPkgs.map(p => ({ pkg: p, name })), ambiguous: classPkgs };
   };
 
-  // 第五步：套用解析结果
+  // 第五步：套用解析结果（不就地修改上面的对象，它们可能来自缓存）
+  const qualified: ParsedFiles = new Map();
   results.forEach((parsed, pkg) => {
-    parsed.classes.forEach(c => {
-      if (duplicatedNames.has(c.name)) {
-        c.displayName = `${c.name} (${pkg})`;
-        c.name = identityOf(pkg, c.name, duplicatedNames);
-      }
+    const classes = parsed.classes.map(c => {
+      if (!duplicatedNames.has(c.name)) return c;
+      return { ...c, displayName: `${c.name} (${pkg})`, name: identityOf(pkg, c.name, duplicatedNames) };
     });
 
-    const resolvedRelations: Relation[] = [];
+    const relations: Relation[] = [];
     parsed.relations.forEach(r => {
       const res = resolve(pkg, r.to);
-      if (res.targets.length === 0) return; // 悬空引用，保持现状（不产生关系）
+      if (res.targets.length === 0) return; // 悬空引用，不产生关系
       const from = identityOf(pkg, r.from, duplicatedNames);
       res.targets.forEach(t => {
-        resolvedRelations.push({ ...r, from, to: identityOf(t.pkg, t.name, duplicatedNames) });
+        relations.push({ ...r, from, to: identityOf(t.pkg, t.name, duplicatedNames) });
       });
       // 只有“真的无法判定”才上报；别名展开出多个成员不算歧义
       if (res.ambiguous.length > 0) {
         report?.ambiguous.push({ file: pkg, from: r.from, to: r.to, candidates: res.ambiguous });
       }
     });
-    parsed.relations = resolvedRelations;
+
+    qualified.set(pkg, { classes, relations });
   });
 
-  return results;
+  return qualified;
 }
 
 /**
