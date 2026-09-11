@@ -1,6 +1,6 @@
 /** TypeScript 代码解析器 */
 
-import { Member, ClassInfo, Relation, ParsedData } from './types';
+import { Member, ClassInfo, Relation, ParsedData, RelationType } from './types';
 
 // 兼容浏览器和 Node.js 环境
 declare const ts: any;
@@ -237,8 +237,8 @@ function splitTopLevel(text: string, sep: string): string[] {
 }
 
 // 判断类型是否是集合容器（数组 / Set / Map 等），用于聚合关系
-const COLLECTION_PREFIX = /^(Array|ReadonlyArray|Set|ReadonlySet|WeakSet|Map|ReadonlyMap|WeakMap)</;
-function isCollectionType(typeText: string): boolean {
+export const COLLECTION_PREFIX = /^(Array|ReadonlyArray|Set|ReadonlySet|WeakSet|Map|ReadonlyMap|WeakMap)</;
+export function isCollectionType(typeText: string): boolean {
   const t = typeText.trim();
   return t.includes('[]') || COLLECTION_PREFIX.test(t);
 }
@@ -268,31 +268,45 @@ function propertyEntriesToRelations(
   aliases: ReadonlyMap<string, string>,
 ): { relations: Relation[]; types: Set<string> } {
   const types = new Set<string>();
+  type PropRelation = 'association' | 'aggregation' | 'composition' | 'dependency';
   const map = new Map<string, {
-    type: 'association' | 'aggregation' | 'composition';
+    type: PropRelation;
     fields: string[];
     multiplicity: string;
   }>();
+
+  // 关系强度与多重性都按档位取最大（否则要先写一堆特例分支）
+  const REL_RANK: Record<PropRelation, number> = { dependency: 0, association: 1, aggregation: 2, composition: 3 };
+  const MULT_RANK: Record<string, number> = { '': 0, '1': 1, '0..1': 2, '*': 3 };
 
   for (const entry of entries) {
     const effectiveType = expandAlias(entry.typeText, aliases);
     const isCollection = isCollectionType(effectiveType);
     const isOptional = entry.isOptional || isOptionalType(effectiveType);
 
+    // 本地联合类型别名：展开出的目标只是“用到”，应降级为依赖
+    const viaUnionAlias = extractTypeNames(entry.typeText)
+      .some(name => {
+        const rhs = aliases.get(name);
+        return rhs !== undefined && extractTypeNames(rhs).length > 1;
+      });
+
     for (const typeName of extractUserTypes(entry.typeText, knownTypes, excluded, aliases)) {
       types.add(typeName);
       if (typeName === ownerName) continue;
 
-      const relType = entry.isNew ? 'composition' : isCollection ? 'aggregation' : 'association';
-      const multiplicity = entry.isNew ? '1' : isCollection ? '*' : isOptional ? '0..1' : '1';
+      const relType: PropRelation = entry.isNew ? 'composition'
+        : viaUnionAlias ? 'dependency'
+        : isCollection ? 'aggregation' : 'association';
+      const multiplicity = entry.isNew ? '1'
+        : viaUnionAlias ? ''
+        : isCollection ? '*' : isOptional ? '0..1' : '1';
 
       const existing = map.get(typeName);
       if (existing) {
         existing.fields.push(entry.fieldName);
-        if (relType === 'composition') existing.type = 'composition';
-        else if (relType === 'aggregation' && existing.type === 'association') existing.type = 'aggregation';
-        if (multiplicity === '*') existing.multiplicity = '*';
-        else if (multiplicity === '0..1' && existing.multiplicity === '1') existing.multiplicity = '0..1';
+        if (REL_RANK[relType] > REL_RANK[existing.type]) existing.type = relType;
+        if (MULT_RANK[multiplicity] > MULT_RANK[existing.multiplicity]) existing.multiplicity = multiplicity;
       } else {
         map.set(typeName, { type: relType, fields: [entry.fieldName], multiplicity });
       }
@@ -305,8 +319,9 @@ function propertyEntriesToRelations(
       from: ownerName,
       to: typeName,
       type: info.type,
-      toMultiplicity: info.multiplicity,
-      label: info.fields.join(', '),
+      toMultiplicity: info.multiplicity || undefined,
+      // 依赖不展示字段名标签（与其它依赖关系保持一致）
+      label: info.type === 'dependency' ? undefined : info.fields.join(', '),
     });
   });
   return { relations, types };

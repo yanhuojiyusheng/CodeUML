@@ -1,6 +1,6 @@
 /** 多文件合并解析（跨文件类型感知 + 语义解析） */
 
-import { collectTypeInfo, extractTypeNames, parseCodeWithKnownTypes } from './parser';
+import { collectTypeInfo, extractTypeNames, isCollectionType, parseCodeWithKnownTypes } from './parser';
 import { resolveTypes } from './resolver';
 import { ParsedData, ClassInfo, Relation } from './types';
 
@@ -39,6 +39,10 @@ interface Target { pkg: string; name: string; }
 interface Resolution {
   targets: Target[];
   ambiguous: string[];
+  /** 来自联合类型别名展开（多目标）—— 这些边只是“用到”，应降级为依赖 */
+  viaUnionAlias?: boolean;
+  /** 来自集合类型别名（如 type X = A[]）—— 关联应升级为聚合 */
+  viaCollectionAlias?: boolean;
 }
 
 /** 别名链的循环保护 */
@@ -198,17 +202,26 @@ export function parseFilesWithCrossFileTypes(
   //
   // 关键点：别名展开后的名字必须回到「别名定义所在包」的作用域解析，
   // 否则它们会在引用文件里找不到声明，被误判为歧义。
-  const combine = (parts: Resolution[]): Resolution => {
-    const targets = dedupeTargets(parts.flatMap(p => p.targets));
-    const ambiguous = [...new Set(parts.flatMap(p => p.ambiguous))];
-    return { targets, ambiguous };
-  };
+  const combine = (parts: Resolution[]): Resolution => ({
+    targets: dedupeTargets(parts.flatMap(p => p.targets)),
+    ambiguous: [...new Set(parts.flatMap(p => p.ambiguous))],
+    viaUnionAlias: parts.some(p => p.viaUnionAlias),
+    viaCollectionAlias: parts.some(p => p.viaCollectionAlias),
+  });
 
   const resolve = (scopePkg: string, name: string, depth = 0): Resolution => {
     const canExpand = depth < MAX_ALIAS_DEPTH;
     /** 在 aliasPkg 的作用域里展开一段别名右值 */
-    const expandIn = (aliasPkg: string, text: string): Resolution =>
-      combine(extractTypeNames(text).map(member => resolve(aliasPkg, member, depth + 1)));
+    const expandIn = (aliasPkg: string, text: string): Resolution => {
+      const members = extractTypeNames(text);
+      const res = combine(members.map(member => resolve(aliasPkg, member, depth + 1)));
+      return {
+        ...res,
+        // 展开出多个目标 => 这是个联合类型别名，边应降级为依赖
+        viaUnionAlias: res.viaUnionAlias === true || members.length > 1,
+        viaCollectionAlias: res.viaCollectionAlias === true || isCollectionType(text),
+      };
+    };
 
     // 命名空间限定名 NS.Type：先解 NS，再在它所属包里解 Type
     const dot = name.indexOf('.');
@@ -264,8 +277,16 @@ export function parseFilesWithCrossFileTypes(
       const res = resolve(pkg, r.to);
       if (res.targets.length === 0) return; // 悬空引用，不产生关系
       const from = identityOf(pkg, r.from, duplicatedNames);
+      // 联合类型别名展开出的边降级为依赖；集类型别名升级为聚合
+      const asDependency = res.viaUnionAlias === true;
+      const asCollection = !asDependency && res.viaCollectionAlias === true && r.type === 'association';
       res.targets.forEach(t => {
-        relations.push({ ...r, from, to: identityOf(t.pkg, t.name, duplicatedNames) });
+        const base = { ...r, from, to: identityOf(t.pkg, t.name, duplicatedNames) };
+        relations.push(asDependency
+          ? { ...base, type: 'dependency', toMultiplicity: undefined, label: undefined }
+          : asCollection
+            ? { ...base, type: 'aggregation', toMultiplicity: '*' }
+            : base);
       });
       // 只有“真的无法判定”才上报；别名展开出多个成员不算歧义
       if (res.ambiguous.length > 0) {

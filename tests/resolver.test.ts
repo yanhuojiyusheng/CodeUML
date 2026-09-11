@@ -193,10 +193,11 @@ describe('跨文件类型别名：在别名定义处的作用域里解析', () =
 
     const targets = merged.relations.filter(r => r.from === 'LaneSnapshot');
     const pkgs = targets.map(r => merged.classes.find(c => c.name === r.to)?.packageName);
-    // 四个成员都在 types.ts，且都带聚合多重性
+    // 联合类型别名展开出来的边降级为依赖（别名不是节点，不应声称“持有”）
     expect(targets).toHaveLength(4);
     expect(new Set(pkgs)).toEqual(new Set(['packages/agent/src/harness/session/types.ts']));
-    expect(targets.every(r => r.type === 'aggregation' && r.toMultiplicity === '*')).toBe(true);
+    expect(targets.every(r => r.type === 'dependency')).toBe(true);
+    expect(targets.every(r => r.toMultiplicity === undefined)).toBe(true);
     expect(report.ambiguous).toEqual([]);
   });
 
