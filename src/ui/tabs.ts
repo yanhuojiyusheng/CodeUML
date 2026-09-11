@@ -1,6 +1,7 @@
 /** 文件标签管理（支持文件夹分组） */
 
 import { escAttr, escHtml } from './dom';
+import { isUnderPath } from '../core/utils';
 
 export interface SourceTab {
   id: string;
@@ -28,6 +29,12 @@ export interface TabsController {
   syncActiveContent(): void;
   /** 折叠 / 展开所有文件夹 */
   toggleAllFolders(): void;
+  /** 切换所有文件的可见性（任一隐藏 -> 全部显示；否则全部隐藏） */
+  toggleAllVisibility(): void;
+  /** 参与解析的可见文件（受文件夹可见性级联影响） */
+  visibleTabs(): SourceTab[];
+  /** 顶部按钮是否处于“已全部隐藏”状态 */
+  isAllHidden(): boolean;
   render(): void;
 }
 
@@ -49,6 +56,8 @@ export function createTabsController(opts: {
   const tabs: SourceTab[] = [];
   const manualFolders = new Set<string>(); // 新建的空文件夹
   const collapsed = new Set<string>();
+  const hiddenFiles = new Set<string>();   // 被隐藏的文件 id
+  const hiddenFolders = new Set<string>(); // 被隐藏的文件夹路径
   let activeTabId: string | null = null;
   let activeFolder = '';
   let pendingSwitchTimer: number | undefined;
@@ -146,21 +155,82 @@ export function createTabsController(opts: {
     }
   }
 
+  // ---------------- 可见性 ----------------
+
+  // ---------------- 可见性 ----------------
+  // 纯标记模型：每个文件 / 文件夹各自记一个“是否隐藏”，彼此不级联。
+  // 文件夹与顶部按钮被点击时，直接把结果“写穿”到名下条目。
+
+  let allHidden = false; // 顶部按钮自身的状态，只由自己的点击决定
+
+  /** 文件夹可见性 = 自身标记 */
+  const isFolderHidden = (path: string) => hiddenFolders.has(path);
+
+  /** 文件可见性 = 自身标记 */
+  const isFileHidden = (tab: SourceTab) => hiddenFiles.has(tab.id);
+
+  /** 可见文件（供解析 / 导出过滤） */
+  function visibleTabs(): SourceTab[] {
+    return tabs.filter(t => !hiddenFiles.has(t.id));
+  }
+
+  /** 批量写入可见性：文件夹（含自身）与文件 */
+  function setVisibility(folders: Iterable<string>, files: Iterable<SourceTab>, visible: boolean) {
+    for (const p of folders) visible ? hiddenFolders.delete(p) : hiddenFolders.add(p);
+    for (const t of files) visible ? hiddenFiles.delete(t.id) : hiddenFiles.add(t.id);
+  }
+
+  /** 切换单个文件可见性 */
+  function toggleFileVisibility(id: string) {
+    hiddenFiles.has(id) ? hiddenFiles.delete(id) : hiddenFiles.add(id);
+    render();
+    onChange();
+  }
+
+  /** 切换文件夹可见性：同步其下所有子文件夹与子文件 */
+  function toggleFolderVisibility(path: string) {
+    const visible = hiddenFolders.has(path); // 当前隐藏 -> 本次要显示
+    setVisibility(
+      allFolderPaths().filter(p => isUnderPath(p, path)),
+      tabs.filter(t => isUnderPath(t.folder, path)),
+      visible,
+    );
+    render();
+    onChange();
+  }
+
+  /** 顶部按钮：单纯的“全部隐藏 / 全部显示” */
+  function toggleAllVisibility() {
+    allHidden = !allHidden;
+    setVisibility(allFolderPaths(), tabs, !allHidden);
+    render();
+    onChange();
+  }
+
+  /** 顶部按钮是否处于“已全部隐藏”状态 */
+  function isAllHidden(): boolean {
+    return allHidden;
+  }
+
   function fileRow(tab: SourceTab, depth: number): string {
+    const hidden = hiddenFiles.has(tab.id);
     return `
-      <div class="file-tab ${tab.id === activeTabId ? 'active' : ''}" data-id="${tab.id}" style="padding-left:${12 + depth * 14}px">
+      <div class="file-tab ${tab.id === activeTabId ? 'active' : ''}${hidden ? ' hidden' : ''}" data-id="${tab.id}" style="padding-left:${12 + depth * 14}px">
         <span class="name" data-id="${tab.id}" title="${escAttr(tab.name)}（双击重命名）">${escHtml(tab.name)}</span>
+        <span class="eye${hidden ? ' off' : ''}" data-id="${tab.id}" title="${hidden ? '取消隐藏' : '隐藏'}（不参与解析）">👁</span>
         <span class="close" data-id="${tab.id}">×</span>
       </div>`;
   }
 
   function folderRow(node: FolderNode, depth: number): string {
     const isCollapsed = collapsed.has(node.path);
+    const hidden = hiddenFolders.has(node.path);
     return `
-      <div class="folder-row ${node.path === activeFolder ? 'active' : ''}" data-folder="${escAttr(node.path)}" title="${escAttr(node.path)}" style="padding-left:${10 + depth * 14}px">
+      <div class="folder-row ${node.path === activeFolder ? 'active' : ''}${hidden ? ' hidden' : ''}" data-folder="${escAttr(node.path)}" title="${escAttr(node.path)}" style="padding-left:${10 + depth * 14}px">
         <span class="arrow">${isCollapsed ? '▸' : '▾'}</span>
         <span class="fname">📁 ${escHtml(node.name)}</span>
         ${node.files.length ? `<span class="count">${node.files.length}</span>` : ''}
+        <span class="eye${hidden ? ' off' : ''}" data-folder="${escAttr(node.path)}" title="${hidden ? '取消隐藏' : '隐藏'}（含全部子项）">👁</span>
         <span class="close" title="删除文件夹">×</span>
       </div>`;
   }
@@ -196,6 +266,10 @@ export function createTabsController(opts: {
       const folder = el.getAttribute('data-folder')!;
       el.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
+        if (target.closest('.eye')) {
+          toggleFolderVisibility(folder);
+          return;
+        }
         if (target.closest('.close')) {
           deleteFolder(folder);
           return;
@@ -224,6 +298,11 @@ export function createTabsController(opts: {
         const closeBtn = target.closest('.close') as HTMLElement | null;
         if (closeBtn) {
           close(closeBtn.dataset.id!);
+          return;
+        }
+        const eyeBtn = target.closest('.eye') as HTMLElement | null;
+        if (eyeBtn) {
+          toggleFileVisibility(eyeBtn.dataset.id!);
           return;
         }
         const tabId = el.getAttribute('data-id')!;
@@ -327,13 +406,13 @@ export function createTabsController(opts: {
     const newPath = parent ? `${parent}/${newName}` : newName;
     if (newPath === oldPath) return;
 
-    const prefix = `${oldPath}/`;
-    const inside = (p: string) => p === oldPath || p.startsWith(prefix);
+    const inside = (p: string) => isUnderPath(p, oldPath);
     const move = (p: string) => newPath + p.slice(oldPath.length);
 
     [...manualFolders].filter(inside).forEach(f => { manualFolders.delete(f); manualFolders.add(move(f)); });
     tabs.forEach(t => { if (inside(t.folder)) t.folder = move(t.folder); });
     [...collapsed].filter(inside).forEach(f => { collapsed.delete(f); collapsed.add(move(f)); });
+    [...hiddenFolders].filter(inside).forEach(f => { hiddenFolders.delete(f); hiddenFolders.add(move(f)); });
     if (inside(activeFolder)) activeFolder = move(activeFolder);
 
     render();
@@ -342,8 +421,7 @@ export function createTabsController(opts: {
 
   /** 删除文件夹及其全部内容 */
   function deleteFolder(folder: string) {
-    const prefix = `${folder}/`;
-    const inside = (p: string) => p === folder || p.startsWith(prefix);
+    const inside = (p: string) => isUnderPath(p, folder);
     const affected = tabs.filter(t => inside(t.folder));
     const subfolders = [...manualFolders].filter(inside);
 
@@ -351,11 +429,13 @@ export function createTabsController(opts: {
         !window.confirm(`删除文件夹「${folder}」及其所有内容？`)) return;
 
     affected.forEach(t => {
+      hiddenFiles.delete(t.id);
       const i = tabs.indexOf(t);
       if (i >= 0) tabs.splice(i, 1);
     });
     subfolders.forEach(f => manualFolders.delete(f));
     [...collapsed].filter(inside).forEach(f => collapsed.delete(f));
+    [...hiddenFolders].filter(inside).forEach(f => hiddenFolders.delete(f));
     if (inside(activeFolder)) activeFolder = '';
 
     if (tabs.length === 0) {
@@ -380,6 +460,7 @@ export function createTabsController(opts: {
       content,
     };
     tabs.push(tab);
+    if (allHidden) hiddenFiles.add(tab.id);
     expandAncestors(folder);
     render();
     switchTo(tab.id);
@@ -396,6 +477,7 @@ export function createTabsController(opts: {
     }));
     added.forEach(t => {
       tabs.push(t);
+      if (allHidden) hiddenFiles.add(t.id);
       expandAncestors(t.folder);
     });
     render();
@@ -409,6 +491,7 @@ export function createTabsController(opts: {
     if (!segment) return;
     const path = activeFolder ? `${activeFolder}/${segment}` : segment;
     manualFolders.add(path);
+    if (allHidden) hiddenFolders.add(path);
     expandAncestors(path);
     collapsed.delete(path);
     activeFolder = path;
@@ -421,6 +504,7 @@ export function createTabsController(opts: {
     if (index === -1) return;
 
     tabs.splice(index, 1);
+    hiddenFiles.delete(id);
 
     if (tabs.length === 0) {
       create('untitled', '// 新文件\n', '');
@@ -447,6 +531,9 @@ export function createTabsController(opts: {
     close,
     syncActiveContent,
     toggleAllFolders,
+    toggleAllVisibility,
+    visibleTabs,
+    isAllHidden,
     render,
   };
 }

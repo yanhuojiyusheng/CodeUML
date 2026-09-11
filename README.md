@@ -72,6 +72,14 @@ npm run build      # bundle to dist/bundle.js + dist/typescript.min.js
 - **Bulk loading** uses chunked reading plus debounced parsing, so the UI stays
   responsive and files appear as they are read.
 - The `⊟` button at the top collapses / expands all folders.
+- **Visibility**: click the 👁 icon next to a file or folder to exclude it from
+  parsing — hidden items disappear from the diagram, the Draw.io XML and the
+  PlantUML output.
+  Clicking a folder's 👁 writes the same state to all of its subfolders and files
+  in one go; toggling a single file or folder stays independent and never
+  updates its parent or the top button.
+  The 👁 button in the top bar is a plain "hide all / show all" toggle whose
+  state follows only its own clicks.
 
 ### Diagram controls
 

@@ -48,6 +48,11 @@ export function textWidth(s: string): number {
   return String(s).length * LAYOUT.CHAR_W + 16;
 }
 
+/** 路径是否等于 base 或位于 base 之下（用于文件夹的整批操作） */
+export function isUnderPath(path: string, base: string): boolean {
+  return path === base || path.startsWith(`${base}/`);
+}
+
 /** 生成关系的唯一标识（用于高亮等场景） */
 export function relationKey(r: { from: string; type: string; to: string }): string {
   return `${r.from}|${r.type}|${r.to}`;

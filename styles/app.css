@@ -18,9 +18,10 @@ main{flex:1;display:flex;overflow:hidden}
 #file-sidebar.resizing{transition:none}
 #sidebar-header{display:flex;align-items:center;justify-content:flex-end;padding:4px;flex:0 0 auto}
 #file-sidebar.collapsed #sidebar-header{justify-content:center;padding:4px 0}
-#sidebar-toggle,#fold-toggle{background:none;border:none;color:#666;font-size:14px;cursor:pointer;padding:4px 8px;border-radius:3px}
-#sidebar-toggle:hover,#fold-toggle:hover{background:#e0e0e0;color:#000}
-#file-sidebar.collapsed #fold-toggle{display:none}
+#sidebar-toggle,#fold-toggle,#visibility-toggle{background:none;border:none;color:#666;font-size:14px;cursor:pointer;padding:4px 8px;border-radius:3px}
+#sidebar-toggle:hover,#fold-toggle:hover,#visibility-toggle:hover{background:#e0e0e0;color:#000}
+#visibility-toggle.off{opacity:.35}
+#file-sidebar.collapsed #fold-toggle,#file-sidebar.collapsed #visibility-toggle{display:none}
 #file-sidebar.collapsed #file-tabs{display:none}
 #sidebar-resizer{width:5px;cursor:col-resize;background:#e0e0e0;flex:none;transition:background .15s}
 #sidebar-resizer:hover,#sidebar-resizer.dragging{background:#0078d4}
@@ -40,6 +41,13 @@ main{flex:1;display:flex;overflow:hidden}
 .folder-row .count{font-size:10px;color:#999}
 .folder-row .close{opacity:.4;font-size:14px;line-height:1;cursor:pointer;flex:0 0 auto}
 .folder-row .close:hover{opacity:1;color:#e5534b}
+
+/* 可见性：眼睛按钮 + 隐藏项降透明度 */
+.file-tab .eye,.folder-row .eye{flex:0 0 auto;font-size:12px;line-height:1;cursor:pointer;opacity:.6;filter:grayscale(.5)}
+.file-tab .eye:hover,.folder-row .eye:hover{opacity:1;filter:none}
+.file-tab .eye.off,.folder-row .eye.off{opacity:.3}
+.file-tab.hidden,.folder-row.hidden{opacity:.45}
+.file-tab.hidden .name{text-decoration:line-through}
 .add-actions{display:flex;border-bottom:1px solid #e0e0e0;flex:0 0 auto;position:sticky;top:0;z-index:1;background:#f3f3f3}
 .file-tab.add-tab{color:#0a7f6b;font-size:12px;cursor:pointer;justify-content:center;flex:1;border-top:none;padding:8px 6px}
 .file-tab.add-tab:hover{background:#e8e8e8;color:#0a9e85}

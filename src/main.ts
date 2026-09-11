@@ -26,6 +26,7 @@ const fileTabsEl = byId<HTMLDivElement>('file-tabs');
 const fileSidebarEl = byId<HTMLDivElement>('file-sidebar');
 const sidebarToggle = byId<HTMLButtonElement>('sidebar-toggle');
 const foldToggleBtn = byId<HTMLButtonElement>('fold-toggle');
+const visibilityToggleBtn = byId<HTMLButtonElement>('visibility-toggle');
 const sidebarResizer = byId<HTMLDivElement>('sidebar-resizer');
 const rightPane = byId<HTMLDivElement>('right-pane');
 const dividerEl = byId<HTMLDivElement>('divider');
@@ -57,7 +58,7 @@ createPan(diagramEl);
 function mergeAllParsed(): Map<string, ParsedData> {
   tabsController.syncActiveContent();
   return parseFilesWithCrossFileTypes(
-    tabsController.tabs.map(tab => ({ name: packageName(tab), content: tab.content }))
+    tabsController.visibleTabs().map(tab => ({ name: packageName(tab), content: tab.content }))
   );
 }
 
@@ -96,8 +97,18 @@ function scheduleUpdate() {
 const tabsController = createTabsController({
   codeEl,
   fileTabsEl,
-  onChange: scheduleUpdate,
+  onChange: () => {
+    syncVisibilityButton();
+    scheduleUpdate();
+  },
 });
+
+/** 顶部眼睛按钮：仅反映自身的开关状态（不受单个文件/文件夹修改影响） */
+function syncVisibilityButton() {
+  const hidden = tabsController.isAllHidden();
+  visibilityToggleBtn.classList.toggle('off', hidden);
+  visibilityToggleBtn.title = hidden ? '显示所有文件' : '隐藏所有文件';
+}
 
 const exportActions = createExportActions({
   diagramEl,
@@ -106,6 +117,7 @@ const exportActions = createExportActions({
 
 // ---------------- 顶部控件 ----------------
 foldToggleBtn.addEventListener('click', () => tabsController.toggleAllFolders());
+visibilityToggleBtn.addEventListener('click', () => tabsController.toggleAllVisibility());
 
 relationModeBtn.addEventListener('click', () => {
   relationMode = (relationMode + 1) % RELATION_MODES.length;
