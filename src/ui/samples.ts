@@ -1,233 +1,246 @@
 /** 默认示例代码（首次打开时加载） */
+//
+// 示例是一个多文件夹的小项目，用来覆盖解析器的全部能力：
+//   - 文件夹分组：src/domain、src/infra、src/service、src/config
+//   - 跨包（跨文件）关系：继承、实现、关联、聚合、组合、依赖
+//   - 类/接口/抽象类/枚举、泛型、静态成员、getter/setter、
+//     构造函数参数属性、可选属性、只读属性、工具类型
+// 每个文件的注释会标注它负责覆盖的点，方便对照类图检查。
 
-// 默认示例代码
-export const DEFAULT_CODE = `// 领域模型与设计模式示例 - models.ts
-// 覆盖：枚举、接口、继承/实现、组合/聚合/关联/依赖、构造函数参数属性、getter/setter
-
-// 枚举：数字枚举 + 字符串枚举
-enum Gender {
-  MALE,
-  FEMALE,
-  UNKNOWN
-}
-
-enum OrderStatus {
-  PENDING = "pending",
-  PAID = "paid",
-  SHIPPED = "shipped",
-  CANCELLED = "cancelled"
-}
-
-// 接口：可选的动物、可飞行的、可序列化的
-interface Pet {
+export interface SampleFile {
+  folder: string;
   name: string;
-  owner?: Person;
-  play(): void;
+  content: string;
 }
 
-interface Flyable {
-  fly(): void;
+const PERSON = `// src/domain/person.ts
+// 覆盖：字符串枚举、接口、抽象类 implements 接口、构造函数参数属性、getter、抽象方法
+
+export enum UserRole {
+  ADMIN = "admin",
+  MEMBER = "member",
+  GUEST = "guest",
 }
 
-interface Serializable {
-  serialize(): string;
+export interface Identifiable {
+  readonly id: string;
+  equalTo(other: Identifiable): boolean;
 }
 
-// 抽象基类
-abstract class Animal implements Serializable {
-  private id: string;
-  public name: string;
-  protected age: number;
-  private gender: Gender;
-  // 组合关系：内部 new 创建
-  private heart = new Heart();
+export abstract class Person implements Identifiable {
+  protected constructor(
+    public readonly id: string,
+    public name: string,
+    protected role: UserRole,
+  ) {}
 
-  constructor(name: string, age: number, gender: Gender) {
-    this.name = name;
-    this.age = age;
-    this.gender = gender;
+  abstract greet(): string;
+
+  get isAdmin(): boolean {
+    return this.role === UserRole.ADMIN;
   }
 
-  abstract makeSound(): void;
-  abstract serialize(): string;
-
-  getAge(): number {
-    return this.age;
-  }
-}
-
-class Heart {
-  public bpm: number = 72;
-  beat(): void {}
-}
-
-// 继承 + 多接口实现
-class Dog extends Animal implements Pet, Flyable {
-  private breed: string;
-  // 关联关系：普通引用类型
-  public owner: Person;
-  // 聚合关系：数组/集合
-  private toys: Toy[] = [];
-
-  constructor(name: string, age: number, gender: Gender, breed: string, owner: Person) {
-    super(name, age, gender);
-    this.breed = breed;
-    this.owner = owner;
-  }
-
-  makeSound(): void { console.log("Woof!"); }
-  serialize(): string { return JSON.stringify({ name: this.name, breed: this.breed }); }
-  play(): void { console.log("playing fetch"); }
-  // 依赖关系：方法参数与返回类型
-  fetch(toy: Toy): Toy | null {
-    return toy;
+  equalTo(other: Identifiable): boolean {
+    return this.id === other.id;
   }
 }
 
-class Bird extends Animal implements Pet {
-  private wingSpan: number;
+export class Address {
+  constructor(
+    public street: string,
+    public city: string,
+    public zip: string,
+  ) {}
+}
+`;
 
-  constructor(name: string, age: number, gender: Gender, wingSpan: number) {
-    super(name, age, gender);
-    this.wingSpan = wingSpan;
-  }
+const USER = `// src/domain/user.ts
+// 覆盖：跨文件继承（Person）、接口实现（Contact）、跨文件聚合（Address）、
+//       组合（Preferences, new 创建）、可选属性
 
-  makeSound(): void { console.log("Chirp!"); }
-  serialize(): string { return this.name; }
-  play(): void { console.log("hopping"); }
-  fly(): void { console.log("flying"); }
+import { Address, Person, UserRole } from './person';
+
+export interface Contact {
+  email: string;
+  phone?: string;
 }
 
-class Cat extends Animal implements Pet {
-  private indoor: boolean;
-
-  constructor(name: string, age: number, gender: Gender, indoor: boolean) {
-    super(name, age, gender);
-    this.indoor = indoor;
-  }
-
-  makeSound(): void { console.log("Meow!"); }
-  serialize(): string { return this.name; }
-  play(): void { console.log("playing with string"); }
+export class Preferences {
+  public theme: string = "light";
+  public locale: string = "zh-CN";
 }
 
-class Toy {
-  public name: string;
-  constructor(name: string) {
-    this.name = name;
-  }
-}
+export class User extends Person implements Contact {
+  public email: string;
+  public phone?: string;
+  // 聚合：来自 person.ts 的 Address（一对多）
+  private addresses: Address[] = [];
+  // 组合：内部 new 创建
+  private preferences = new Preferences();
 
-// 人：getter/setter + 可选属性 + 聚合
-class Person {
-  public name: string;
-  private email?: string;
-  private pets: Pet[];
-
-  constructor(name: string) {
-    this.name = name;
-    this.pets = [];
+  constructor(id: string, name: string, role: UserRole, email: string) {
+    super(id, name, role);
+    this.email = email;
   }
 
-  get id(): string {
-    return this.name.toLowerCase();
+  greet(): string {
+    return "Hi, " + this.name;
   }
 
-  set displayEmail(value: string) {
-    this.email = value;
-  }
-
-  adopt(pet: Pet): void {
-    this.pets.push(pet);
+  addAddress(address: Address): void {
+    this.addresses.push(address);
   }
 }
 `;
 
-export const DEFAULT_CODE_2 = `// 服务层与数据访问 - services.ts
-// 覆盖：跨文件依赖/关联、构造函数参数属性、可选返回、泛型剥壳
+const ORDER = `// src/domain/order.ts
+// 覆盖：数字枚举、接口实现（Coupon -> Promotion）、跨文件关联（User）、
+//       聚合（OrderLine / Promotion）、组合（ShippingInfo）、依赖（throw new OrderError）
 
-class UserService {
-  // 关联：字段引用
-  private database: Database;
-  private logger: Logger;
+import { User } from './user';
 
-  // 构造函数参数属性：public/private/readonly 自动成为字段
-  constructor(private repo: UserRepository, db: Database, logger: Logger) {
-    this.database = db;
-    this.logger = logger;
-  }
+export enum OrderStatus {
+  PENDING,
+  PAID,
+  SHIPPED,
+  CANCELLED,
+}
 
-  findUser(id: string): User | null {
-    return this.repo.findById(id);
-  }
+export interface Promotion {
+  discount(total: number): number;
+}
 
-  listUsers(): Promise<User[]> {
-    return this.repo.list();
-  }
+export class Coupon implements Promotion {
+  constructor(public code: string, private amount: number) {}
 
-  createUser(data: UserData): User {
-    return {} as User;
-  }
-
-  // 依赖：参数 + 返回值
-  deleteUser(deleter: UserDeleter, id: string): boolean {
-    return deleter.delete(id);
+  discount(total: number): number {
+    return Math.max(0, total - this.amount);
   }
 }
 
-interface UserRepository {
-  findById(id: string): User | null;
-  list(): Promise<User[]>;
+export class OrderLine {
+  constructor(public product: string, public quantity: number, public price: number) {}
+
+  get subtotal(): number {
+    return this.quantity * this.price;
+  }
 }
 
-interface UserDeleter {
-  delete(id: string): boolean;
+export class ShippingInfo {
+  public carrier: string = "SF";
+  public trackingNo?: string;
 }
 
-class Database {
+export class OrderError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OrderError";
+  }
+}
+
+export class Order {
+  // 关联：跨文件引用 User（可选 -> 0..1）
+  private customer?: User;
+  // 聚合：一对多
+  private lines: OrderLine[] = [];
+  private promotions: Promotion[] = [];
+  // 组合：内部 new 创建
+  private shipping = new ShippingInfo();
+  private status: OrderStatus = OrderStatus.PENDING;
+
+  constructor(public readonly id: string, customer: User) {
+    this.customer = customer;
+  }
+
+  get total(): number {
+    return this.lines.reduce((sum, line) => sum + line.subtotal, 0);
+  }
+
+  submit(): OrderStatus {
+    if (this.lines.length === 0) {
+      // 依赖：方法体内 throw new
+      throw new OrderError("empty order");
+    }
+    this.status = OrderStatus.PAID;
+    return this.status;
+  }
+
+  applyPromotion(promotion: Promotion): void {
+    this.promotions.push(promotion);
+  }
+}
+`;
+
+const LOGGER = `// src/infra/logger.ts
+// 覆盖：数字枚举、静态只读/静态可变成员、带默认值的构造函数
+
+export enum LogLevel {
+  DEBUG = 0,
+  INFO = 1,
+  ERROR = 2,
+}
+
+export class Logger {
+  private static instances = 0;
+  public static readonly DEFAULT_LEVEL: LogLevel = LogLevel.INFO;
+  private level: LogLevel;
+
+  constructor(level: LogLevel = Logger.DEFAULT_LEVEL) {
+    this.level = level;
+    Logger.instances++;
+  }
+
+  log(level: LogLevel, message: string): void {}
+
+  error(message: string): void {
+    this.log(LogLevel.ERROR, message);
+  }
+}
+`;
+
+const DATABASE = `// src/infra/database.ts
+// 覆盖：普通类、泛型类（CacheEntry<V>）、构造函数参数属性
+
+export class Database {
   private connectionString: string;
 
-  constructor(connStr: string) {
-    this.connectionString = connStr;
+  constructor(connectionString: string) {
+    this.connectionString = connectionString;
   }
 
   query(sql: string): any[] {
     return [];
   }
+
+  execute(sql: string): number {
+    return 0;
+  }
 }
 
-class Logger {
-  private level: string = "info";
-  log(message: string): void {}
-  error(message: string): void {}
-}
+export class CacheEntry<V> {
+  public hits: number = 0;
 
-interface User {
-  id: string;
-  name: string;
-  email: string;
-}
-
-interface UserData {
-  name: string;
-  email: string;
+  constructor(public value: V, public key: string) {}
 }
 `;
 
-export const DEFAULT_CODE_3 = `// 第三方库与工具 - utils.ts
-// 覆盖：工具类型剥壳（Partial/Required/Record/Map/Set）、单例模式、静态成员、抽象静态
+const REPOSITORY = `// src/infra/repository.ts
+// 覆盖：泛型抽象类、跨文件组合（Database）、Map/CacheEntry 泛型脱壳、
+//       抽象方法、泛型继承（InMemoryRepository<T> extends Repository<T>）
 
-// 泛型仓库：泛型参数 + Map 值类型关联
-class Repository<T> {
+import { CacheEntry, Database } from './database';
+
+export abstract class Repository<T> {
   protected items: Map<string, T> = new Map();
-  private cache: Map<number, CacheEntry<T>> = new Map();
+  // 组合：内部 new 创建（跨文件）
+  private db = new Database("sqlite://memory");
+  // 泛型聚合：CacheEntry<T>[] -> CacheEntry
+  private cache: CacheEntry<T>[] = [];
+
+  abstract findById(id: string): T | undefined;
 
   put(key: string, value: T): void {
     this.items.set(key, value);
-  }
-
-  get(key: string): T | undefined {
-    return this.items.get(key);
   }
 
   list(): T[] {
@@ -235,43 +248,117 @@ class Repository<T> {
   }
 }
 
-class CacheEntry<V> {
-  public value: V;
-  public timestamp: number;
-  constructor(value: V) {
-    this.value = value;
-    this.timestamp = Date.now();
-  }
-}
-
-// 单例模式 + 静态成员
-class Config {
-  private static instance: Config;
-  public static readonly VERSION: string = "1.0.0";
-  private constructor(public data: Record<string, Partial<User>>) {}
-
-  static getInstance(): Config {
-    if (!Config.instance) {
-      Config.instance = new Config({});
-    }
-    return Config.instance;
-  }
-
-  get(key: string): Partial<User> | undefined {
-    return this.data[key];
-  }
-}
-
-// 工具类型剥壳
-class UserStore {
-  private users: Required<Record<string, User>> = {} as any;
-  private partials: Partial<User>[] = [];
-  private ids: Set<string> = new Set();
-
-  save(user: User): void {
-    this.ids.add(user.id);
-    this.partials.push(user);
+export class InMemoryRepository<T> extends Repository<T> {
+  findById(id: string): T | undefined {
+    return this.items.get(id);
   }
 }
 `;
 
+const USER_SERVICE = `// src/service/user-service.ts
+// 覆盖：跨文件接口继承（UserRepository extends Repository<User>）、
+//       构造函数参数属性关联（UserRepository / Logger）、跨文件依赖（User）
+
+import { User } from '../domain/user';
+import { LogLevel, Logger } from '../infra/logger';
+import { InMemoryRepository, Repository } from '../infra/repository';
+
+export interface UserRepository extends Repository<User> {
+  findByEmail(email: string): User | null;
+}
+
+// 跨包继承 InMemoryRepository<User> + 本包接口实现 UserRepository
+export class MemoryUserRepository extends InMemoryRepository<User> implements UserRepository {
+  findByEmail(email: string): User | null {
+    return this.list().find(user => user.email === email) || null;
+  }
+}
+
+export class UserService {
+  constructor(
+    private repository: UserRepository,
+    private logger: Logger,
+  ) {}
+
+  find(id: string): User | undefined {
+    return this.repository.findById(id);
+  }
+
+  register(user: User): void {
+    this.repository.put(user.id, user);
+    this.logger.log(LogLevel.INFO, "registered " + user.name);
+  }
+}
+`;
+
+const ORDER_SERVICE = `// src/service/order-service.ts
+// 覆盖：跨包关联（Repository / UserService / Logger）、跨文件依赖（Order / Promotion）
+
+import { Order, Promotion } from '../domain/order';
+import { LogLevel, Logger } from '../infra/logger';
+import { Repository } from '../infra/repository';
+import { UserService } from './user-service';
+
+export class OrderService {
+  constructor(
+    private orders: Repository<Order>,
+    private users: UserService,
+    private logger: Logger,
+  ) {}
+
+  // 依赖：方法参数类型（Order / Promotion 都不在本类字段里）
+  checkout(order: Order, promotion: Promotion): number {
+    this.logger.log(LogLevel.INFO, "checkout " + order.id);
+    return promotion.discount(order.total);
+  }
+
+  countOrdersFor(userId: string): number {
+    const user = this.users.find(userId);
+    return user ? this.orders.list().length : 0;
+  }
+}
+`;
+
+const APP_CONFIG = `// src/config/app-config.ts
+// 覆盖：单例（private 构造函数 + static 实例）、静态只读、getter、
+//       工具类型脱壳（Partial/Record）、跨文件关联（LogLevel）
+
+import { LogLevel } from '../infra/logger';
+
+export interface AppSettings {
+  theme: string;
+  logLevel: LogLevel;
+  features?: Partial<Record<string, boolean>>;
+}
+
+export class Config {
+  private static instance: Config | undefined;
+  public static readonly VERSION: string = "1.0.0";
+
+  private constructor(public readonly settings: AppSettings) {}
+
+  static getInstance(): Config {
+    if (!Config.instance) {
+      Config.instance = new Config({ theme: "light", logLevel: LogLevel.INFO });
+    }
+    return Config.instance;
+  }
+
+  get logLevel(): LogLevel {
+    return this.settings.logLevel;
+  }
+}
+`;
+
+/** 首次打开时加载的示例文件（包名 = folder + / + name） */
+export const DEFAULT_FILES: SampleFile[] = [
+  { folder: 'src/domain', name: 'person.ts', content: PERSON },
+  { folder: 'src/domain', name: 'user.ts', content: USER },
+  { folder: 'src/domain', name: 'order.ts', content: ORDER },
+  { folder: 'src/infra', name: 'logger.ts', content: LOGGER },
+  { folder: 'src/infra', name: 'database.ts', content: DATABASE },
+  { folder: 'src/infra', name: 'repository.ts', content: REPOSITORY },
+  { folder: 'src/service', name: 'user-service.ts', content: USER_SERVICE },
+  { folder: 'src/service', name: 'order-service.ts', content: ORDER_SERVICE },
+  { folder: 'src/config', name: 'app-config.ts', content: APP_CONFIG },
+];

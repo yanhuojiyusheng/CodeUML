@@ -14,7 +14,7 @@ import { createHighlighter } from './ui/highlight';
 import { createSplitPanes } from './ui/panes';
 import { createExportActions } from './ui/actions';
 import { createZoom, createPan } from './ui/zoom';
-import { DEFAULT_CODE, DEFAULT_CODE_2, DEFAULT_CODE_3 } from './ui/samples';
+import { DEFAULT_FILES } from './ui/samples';
 
 // ---------------- DOM 元素 ----------------
 const codeEl = byId<HTMLTextAreaElement>('code');
@@ -276,7 +276,8 @@ createSplitPanes({
   editorToggle,
 });
 
-// ---------------- 初始化：加载示例 ----------------
-tabsController.create('models', DEFAULT_CODE);
-tabsController.create('services', DEFAULT_CODE_2);
-tabsController.create('utils', DEFAULT_CODE_3);
+// ---------------- 初始化：加载示例（含文件夹的跨包示例项目） ----------------
+const sampleTabs = tabsController.addTabs(
+  DEFAULT_FILES.map(f => ({ name: f.name, content: f.content, folder: f.folder })),
+);
+if (sampleTabs.length) tabsController.switchTo(sampleTabs[0].id);
