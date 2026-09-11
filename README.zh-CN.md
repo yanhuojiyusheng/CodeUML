@@ -69,6 +69,9 @@ npm run build      # 打包到 dist/bundle.js + dist/typescript.min.js
 - **可见性**：点击文件或文件夹右侧的 👁 图标可将其从解析中排除，隐藏项不再出现在类图、Draw.io XML 和 PlantUML 中。
   点击文件夹的 👁 会把同一状态一次性写给其下所有子文件夹与文件；单独切换文件或文件夹互不影响，
   也不会改变上层文件夹或顶部按钮的状态。顶部 `👁` 按钮只是纯粹的“全部隐藏 / 全部显示”，亮暗只由它自己的点击决定。
+- **跨包同名类**：不会被丢弃。两个类都会画出来，标题带上包名区分（如 `Config (src/api/config.ts)`）。
+  引用由 TypeScript 自身的模块解析定位，所以 `import { Config } from './config'` 会精确连到对应的类；
+  没有 import 可用时，歧义引用会连到全部候选，这两种情况都会列在视图上方的提示条里。
 
 ### 图表操作
 
@@ -120,7 +123,9 @@ CodeUML/
 
 | 模块 | 职责 |
 |------|------|
-| `core/parser.ts` | 解析代码，提取类 / 接口 / 关系 |
+| `core/parser.ts` | 语法解析：提取类 / 接口 / 枚举 / 成员 / 关系 |
+| `core/resolver.ts` | 语义解析：用内存版 TypeScript `Program` 把每个类型名定位到声明它的包 |
+| `core/merge.ts` | 多文件合并：按包唯一化类身份、解析关系端点、产出诊断 |
 | `core/layout.ts` | 定位类框，并挑选接近正方形的包排布 |
 | `core/svg.ts` | 将布局渲染成 SVG（类框与关系箭头） |
 | `core/drawio.ts` | 生成 Draw.io 兼容的 mxfile XML |
@@ -160,7 +165,7 @@ node server.js --check # 服务器自检
 
 ## 技术栈
 
-- **TypeScript Compiler API** — 代码解析
+- **TypeScript Compiler API** — 语法解析 + 语义符号解析
 - **SVG** — 图表渲染
 - **esbuild** — 构建打包
 - **Node 内置 `http`** — 静态文件服务器

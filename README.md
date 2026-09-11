@@ -71,6 +71,12 @@ npm run build      # bundle to dist/bundle.js + dist/typescript.min.js
   double-clicking, delete with `×` (removes everything inside).
 - **Bulk loading** uses chunked reading plus debounced parsing, so the UI stays
   responsive and files appear as they are read.
+- **Same name in different packages**: nothing is dropped. Both classes are
+  drawn, each title qualified by its package (e.g. `Config (src/api/config.ts)`).
+  References are resolved with TypeScript's own module resolution, so
+  `import { Config } from './config'` points at the right class; when no import
+  is available an ambiguous reference is connected to every candidate and both
+  cases are listed in the banner above the view.
 - The `⊟` button at the top collapses / expands all folders.
 - **Visibility**: click the 👁 icon next to a file or folder to exclude it from
   parsing — hidden items disappear from the diagram, the Draw.io XML and the
@@ -131,7 +137,9 @@ CodeUML/
 
 | Module | Responsibility |
 |--------|----------------|
-| `core/parser.ts` | Parses code, extracts classes / interfaces / relations |
+| `core/parser.ts` | Syntax pass: extracts classes / interfaces / enums / members / relations |
+| `core/resolver.ts` | Semantic pass: resolves each type name to the package that declares it, via an in-memory TypeScript `Program` |
+| `core/merge.ts` | Multi-file merge: unique class identity per package, endpoint resolution, diagnostics |
 | `core/layout.ts` | Places classes and picks a near-square arrangement of packages |
 | `core/svg.ts` | Renders the layout to SVG (boxes and relation arrows) |
 | `core/drawio.ts` | Generates Draw.io-compatible mxfile XML |
@@ -171,7 +179,7 @@ Multiplicity: `*` for arrays/collections, `0..1` for optional or nullable types,
 
 ## Tech Stack
 
-- **TypeScript Compiler API** — code parsing
+- **TypeScript Compiler API** — syntax parsing + semantic symbol resolution
 - **SVG** — diagram rendering
 - **esbuild** — bundling
 - **Node built-in `http`** — static file server

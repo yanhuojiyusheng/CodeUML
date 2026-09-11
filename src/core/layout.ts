@@ -107,14 +107,15 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     const methsH = Math.max(displayMeths + (hasMoreMeths ? 1 : 0), 1) * LAYOUT.LINE_H;
     const h = stereotypeH + titleH + 1 + propsH + 1 + methsH + 8;
 
+    const title = c.displayName || c.name;
     const lines = [
       ...(c.isInterface ? [{ text: '«interface»', cls: 'stereotype' }] : []),
       ...(c.isAbstract && !c.isInterface ? [{ text: '«abstract»', cls: 'stereotype' }] : []),
-      { text: c.name, cls: 'title' }
+      { text: title, cls: 'title' }
     ];
 
     // 计算最大宽度
-    let maxW = textWidth(c.name);
+    let maxW = textWidth(title);
     props.slice(0, displayProps).forEach(p => { maxW = Math.max(maxW, textWidth(memberText(p))); });
     meths.slice(0, displayMeths).forEach(m => { maxW = Math.max(maxW, textWidth(memberText(m))); });
     if (hasMoreProps || hasMoreMeths) {

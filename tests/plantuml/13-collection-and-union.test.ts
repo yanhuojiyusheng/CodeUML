@@ -48,7 +48,7 @@ describe('关系判断难点 - 集合与联合类型', () => {
       expect(r).toBeDefined();
     });
 
-    test('Set<T> → 关联 T', () => {
+    test('Set<T> → 聚合 T', () => {
       const code = `
         class Entry { id: number; }
         class Cache {
@@ -59,6 +59,8 @@ describe('关系判断难点 - 集合与联合类型', () => {
       
       const r = result.relations.find(r => r.from === 'Cache' && r.to === 'Entry');
       expect(r).toBeDefined();
+      expect(r?.type).toBe('aggregation');
+      expect(r?.toMultiplicity).toBe('*');
     });
 
     test('Record<K, V> → 关联 V', () => {

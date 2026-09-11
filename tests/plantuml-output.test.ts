@@ -239,8 +239,13 @@ describe('PlantUML 输出格式化（生产代码路径）', () => {
         { name: 'a', content: 'class User { name: string; }' },
         { name: 'b', content: 'class User { id: number; }' },
       ]);
-      const occurrences = (puml.match(/class "User" as User/g) || []).length;
-      expect(occurrences).toBe(1);
+      // 两个类都输出，标题带包名区分
+      expect(puml).toContain('class "User (a)"');
+      expect(puml).toContain('class "User (b)"');
+      // 别名必须全局唯一
+      const aliases = [...puml.matchAll(/\bas ([A-Za-z0-9_]+)/g)].map(m => m[1]);
+      expect(aliases).toHaveLength(2);
+      expect(new Set(aliases).size).toBe(2);
       expect(validatePlantUML(puml)).toEqual([]);
     });
 

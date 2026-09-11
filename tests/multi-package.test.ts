@@ -202,7 +202,7 @@ describe('多包合并 - 跨包关系拓扑', () => {
     expect(validatePlantUML(puml)).toEqual([]);
   });
 
-  test('跨包泛型实例化：只关联泛型类本身，不关联类型实参', () => {
+  test('跨包泛型实例化：泛型类本身与类型实参都建立关系', () => {
     const { merged, puml } = build([
       { name: 'model', content: 'class User { id: string; }' },
       { name: 'repo', content: 'class Repository<T> { private items: T[] = []; }' },
@@ -210,7 +210,8 @@ describe('多包合并 - 跨包关系拓扑', () => {
     ]);
 
     expectRelation(merged, 'UserService', 'Repository', 'association');
-    expect(merged.relations.filter(r => r.from === 'UserService')).toHaveLength(1);
+    expectRelation(merged, 'UserService', 'User', 'association');
+    expect(merged.relations.filter(r => r.from === 'UserService')).toHaveLength(2);
     // 泛型参数 T 没有对应类型时不应产生关系
     expect(merged.relations.filter(r => r.from === 'Repository')).toHaveLength(0);
     expect(validatePlantUML(puml)).toEqual([]);
@@ -234,14 +235,16 @@ describe('多包合并 - 跨包关系拓扑', () => {
       },
     ]);
 
-    // 五个字段指向同一类型 -> 合并为一条聚合（ReadonlyArray 拉高为聚合 *）
+    // 五个字段指向同一类型 -> 合并为一条聚合（Set / ReadonlyArray 均为聚合 *）
     const toUser = expectRelation(merged, 'UserStore', 'User', 'aggregation');
     expect(toUser.toMultiplicity).toBe('*');
     expect(toUser.label).toBe('a, b, c, d, e');
 
-    // Map<Role, User> -> 键与值都关联
-    expectRelation(merged, 'Pair', 'Role', 'association');
-    expectRelation(merged, 'Pair', 'User', 'association');
+    // Map<Role, User> -> 键与值都聚合
+    const pairRole = expectRelation(merged, 'Pair', 'Role', 'aggregation');
+    const pairUser = expectRelation(merged, 'Pair', 'User', 'aggregation');
+    expect(pairRole.toMultiplicity).toBe('*');
+    expect(pairUser.toMultiplicity).toBe('*');
     expect(validatePlantUML(puml)).toEqual([]);
   });
 
@@ -287,65 +290,62 @@ describe('多包合并 - 跨包关系拓扑', () => {
 // 2. 跨包同名类去重
 // ============================================================
 
-describe('多包合并 - 同名类去重', () => {
+describe('多包合并 - 同名类按包区分', () => {
 
-  test('同名类以首次出现的包为准，成员取首个定义', () => {
+  test('同名类在两个包里都保留，成员各自独立；无 import 的引用连到全部候选', () => {
     const { merged, puml } = build([
       { name: 'v1', content: 'class User { name: string; }' },
       { name: 'v2', content: 'class User { id: number; }' },
       { name: 'app', content: 'class App { private u: User; }' },
     ]);
 
-    expect(merged.classes.filter(c => c.name === 'User')).toHaveLength(1);
-    expect(merged.classes.find(c => c.name === 'User')!.packageName).toBe('v1');
-
-    expect((puml.match(/class "User" as User/g) || [])).toHaveLength(1);
+    expect(merged.classes.filter(c => (c.displayName || c.name).startsWith('User'))).toHaveLength(2);
+    expect((puml.match(/class "User \(/g) || [])).toHaveLength(2);
     expect(puml).toContain('+ name : string');
-    expect(puml).not.toContain('id : number');
-    expectRelation(merged, 'App', 'User', 'association');
+    expect(puml).toContain('id : number');
+    // app 没 import，User 有两个候选 -> 两条关联
+    expect(merged.relations.filter(r => r.from === 'App')).toHaveLength(2);
     expect(validatePlantUML(puml)).toEqual([]);
   });
 
-  test('同名类被跳过时其关系仍保留，且重复关系保留首个标签', () => {
+  test('两个同名类各自的关系与标签都保留', () => {
     const { merged, puml } = build([
       { name: 'p1', content: 'class A { x: string; private u: U; }' },
       { name: 'p2', content: 'class A { private other: U; }' },
       { name: 'p3', content: 'class U {}' },
     ]);
 
-    // 类定义取 p1（含 x），p2 的关系 A -> U 仍然保留
-    expect(puml).toContain('+ x : string');
-    expectRelation(merged, 'A', 'U', 'association');
-
-    // 同一 from-type-to 去重：保留 p1 的标签 u，而不是 p2 的 other
-    const relLines = puml.split('\n').filter(l => l.startsWith('A --> U'));
-    expect(relLines).toHaveLength(1);
-    expect(relLines[0]).toContain('u');
-    expect(relLines[0]).not.toContain('other');
+    expect(merged.classes.filter(c => (c.displayName || c.name).startsWith('A'))).toHaveLength(2);
+    // U 全局唯一 -> 两个 A 各自关联到它，标签不同
+    const relLines = puml.split('\n').filter(l => /--> U\b/.test(l));
+    expect(relLines).toHaveLength(2);
+    expect(relLines.some(l => l.includes('u'))).toBe(true);
+    expect(relLines.some(l => l.includes('other'))).toBe(true);
     expect(validatePlantUML(puml)).toEqual([]);
   });
 
-  test('同名接口优先于同名类（首次出现为准）', () => {
-    const { puml } = build([
+  test('同名接口与类并存（按包区分，不再互相覆盖）', () => {
+    const { merged, puml } = build([
       { name: 'contract', content: 'interface Service { run(): void; }' },
       { name: 'impl', content: 'class Service { private x: number; }' },
       { name: 'client', content: 'class Client { private s: Service; }' },
     ]);
 
-    expect(puml).toContain('interface "Service" as Service {');
-    expect(puml).not.toContain('class "Service" as Service {');
-    expect(puml).toContain('Client --> Service : s');
+    expect(puml).toContain('interface "Service (contract)"');
+    expect(puml).toContain('class "Service (impl)"');
+    // client 没 import -> 两个候选都连
+    expect(merged.relations.filter(r => r.from === 'Client')).toHaveLength(2);
     expect(validatePlantUML(puml)).toEqual([]);
   });
 
-  test('同名枚举优先于同名类（首次出现为准）', () => {
+  test('同名枚举与类并存', () => {
     const { puml } = build([
       { name: 'a', content: 'enum Status { OK, FAIL }' },
       { name: 'b', content: 'class Status { reason: string; }' },
     ]);
 
-    expect(puml).toContain('enum "Status" as Status {');
-    expect(puml).not.toContain('class "Status" as Status {');
+    expect(puml).toContain('enum "Status (a)"');
+    expect(puml).toContain('class "Status (b)"');
     expect(validatePlantUML(puml)).toEqual([]);
   });
 });
@@ -491,7 +491,7 @@ describe('多包合并 - 解析器特殊情况', () => {
     expect(merged.relations.filter(r => r.to === 'T')).toHaveLength(0);
   });
 
-  test('implements 泛型实参只产生对泛型接口的关系', () => {
+  test('implements 泛型实参：接口是 implements，类型实参是 dependency', () => {
     const { merged } = build([
       { name: 'iface', content: 'interface Repository<T> { get(): T; }' },
       { name: 'impl', content: 'class UserRepo implements Repository<User> { get(): User | null { return null; } }' },
@@ -622,8 +622,8 @@ describe('多包合并 - 布局集成', () => {
     ]);
 
     const xml = generateDrawioXML(layoutDiagram(merged));
-    // 2 个类框（App 与去重后的 User），1 条关系边
-    expect((xml.match(/vertex="1"/g) || [])).toHaveLength(2);
-    expect((xml.match(/edge="1"/g) || [])).toHaveLength(1);
+    // 3 个类框（App + 两个 User），2 条边（App 连到两个候选）
+    expect((xml.match(/vertex="1"/g) || [])).toHaveLength(3);
+    expect((xml.match(/edge="1"/g) || [])).toHaveLength(2);
   });
 });

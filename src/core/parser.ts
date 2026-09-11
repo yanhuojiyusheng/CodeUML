@@ -5,6 +5,45 @@ import { Member, ClassInfo, Relation, ParsedData } from './types';
 // 兼容浏览器和 Node.js 环境
 declare const ts: any;
 
+/** 按扩展名选择解析模式：.tsx/.jsx 必须启用 JSX，否则同行 JSX 会让后续声明整块丢失 */
+function scriptKindFor(fileName?: string) {
+  const name = (fileName || '').toLowerCase();
+  if (name.endsWith('.tsx')) return ts.ScriptKind.TSX;
+  if (name.endsWith('.jsx')) return ts.ScriptKind.JSX;
+  if (name.endsWith('.js') || name.endsWith('.mjs') || name.endsWith('.cjs')) return ts.ScriptKind.JS;
+  return ts.ScriptKind.TS;
+}
+
+/** 文件名参与解析，以便根据扩展名选择 ScriptKind */
+function createSourceFile(code: string, fileName?: string) {
+  return ts.createSourceFile(
+    fileName || 'input.ts',
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKindFor(fileName),
+  );
+}
+
+/** 展平顶层声明：递归进入 namespace / module（含嵌套与点号命名空间） */
+function flattenStatements(sf: any): any[] {
+  const out: any[] = [];
+  const collect = (node: any) => {
+    for (const child of node.statements || []) {
+      if (ts.isModuleDeclaration(child) && child.body) {
+        // 点号命名空间（namespace A.B）的 body 仍是 ModuleDeclaration，需要一路剥到底
+        let body = child.body;
+        while (ts.isModuleDeclaration(body) && body.body) body = body.body;
+        collect(body);
+        continue;
+      }
+      out.push(child);
+    }
+  };
+  collect(sf);
+  return out;
+}
+
 function getModifier(node: any): '+' | '-' | '#' {
   const flags = ts.getCombinedModifierFlags(node);
   if (flags & ts.ModifierFlags.Private) return '-';
@@ -18,80 +57,106 @@ function getReturnType(sig: any, sf: any): string {
 }
 
 // 清理类型文本，提取用户类型名列表
-function cleanTypeName(typeText: string): string {
+// aliases：类型别名展开表（如 UserRef -> User）；depth 仅用于别名链的循环保护
+function cleanTypeName(typeText: string, aliases?: ReadonlyMap<string, string>, depth = 0): string {
   if (!typeText) return '';
   let name = typeText.trim();
-  
+
+  // 整段命中别名则展开（支持 A -> B -> User 链式，带循环保护）
+  if (aliases && depth < 8) {
+    const target = aliases.get(name);
+    if (target !== undefined && target.trim() !== name) {
+      return cleanTypeName(target, aliases, depth + 1);
+    }
+  }
+
+  const self = (t: string) => cleanTypeName(t, aliases, depth);
+
   // 处理数组形式：Foo[] 或 Array<Foo>
   if (name.endsWith('[]')) {
-    return cleanTypeName(name.slice(0, -2));
+    return self(name.slice(0, -2));
+  }
+  // 去掉整体括号：(A | B) -> A | B
+  if (name.startsWith('(') && name.endsWith(')')) {
+    return self(name.slice(1, -1));
   }
   if (name.startsWith('Array<') && name.endsWith('>')) {
-    return cleanTypeName(name.slice(6, -1));
+    return self(name.slice(6, -1));
   }
   if (name.startsWith('ReadonlyArray<') && name.endsWith('>')) {
-    return cleanTypeName(name.slice(14, -1));
+    return self(name.slice(14, -1));
   }
-  
+
   // 处理 Promise<T>
   if (name.startsWith('Promise<') && name.endsWith('>')) {
-    return cleanTypeName(name.slice(8, -1));
+    return self(name.slice(8, -1));
   }
-  
+
   // 处理 Record<K, V> -> 返回 V（值类型）
   if (name.startsWith('Record<') && name.endsWith('>')) {
     const inner = name.slice(7, -1);
     const commaIdx = inner.lastIndexOf(',');
     if (commaIdx >= 0) {
-      return cleanTypeName(inner.slice(commaIdx + 1));
+      return self(inner.slice(commaIdx + 1));
     }
-    return cleanTypeName(inner);
+    return self(inner);
   }
-  
+
   // 处理 Set<T>
   if (name.startsWith('Set<') && name.endsWith('>')) {
-    return cleanTypeName(name.slice(4, -1));
+    return self(name.slice(4, -1));
   }
   if (name.startsWith('WeakSet<') && name.endsWith('>')) {
-    return cleanTypeName(name.slice(8, -1));
+    return self(name.slice(8, -1));
   }
-  
+
   // 处理 Map<K, V> -> 返回 K 和 V（用逗号分隔）
   if (name.startsWith('Map<') && name.endsWith('>')) {
     const inner = name.slice(4, -1);
     const parts = splitGenericParams(inner);
-    return parts.map(p => cleanTypeName(p)).filter(Boolean).join(', ');
+    return parts.map(p => self(p)).filter(Boolean).join(', ');
   }
-  
+
   // 处理工具类型：Partial<T>, Required<T>, Readonly<T>, Pick<T, K>, Omit<T, K> 等
   const utilityTypes = ['Partial', 'Required', 'Readonly', 'Pick', 'Omit', 'Exclude', 'Extract', 'NonNullable'];
   for (const util of utilityTypes) {
     if (name.startsWith(util + '<') && name.endsWith('>')) {
       const inner = name.slice(util.length + 1, -1);
       const firstParam = splitGenericParams(inner)[0];
-      return cleanTypeName(firstParam);
+      return self(firstParam);
     }
   }
-  
-  // 处理联合类型：拆分并返回所有用户类型
-  if (name.includes('|')) {
-    const parts = name.split('|').map((s: string) => s.trim());
+
+  // 处理联合类型：按顶层 | 切分（避免拆开 Repo<A | B>），返回所有用户类型
+  const unionParts = splitTopLevel(name, '|');
+  if (unionParts.length > 1) {
     const userTypes: string[] = [];
-    for (const part of parts) {
-      const cleaned = cleanTypeName(part);
+    for (const part of unionParts) {
+      const cleaned = self(part.trim());
       if (cleaned && !BASIC_TYPES.has(cleaned)) {
         userTypes.push(cleaned);
       }
     }
     return userTypes.join(', ');
   }
-  
-  // 处理泛型类型：提取基础类型
+
+  // 用户泛型：保留基类型并递归收集类型实参（与 Promise/Map 等内建泛型行为一致）
   if (name.includes('<')) {
-    name = name.split('<')[0].trim();
+    const base = name.split('<')[0].trim();
+    const inner = name.slice(name.indexOf('<') + 1, name.lastIndexOf('>'));
+    const args = splitGenericParams(inner).map(p => self(p)).filter(Boolean);
+    return [base, ...args].filter(Boolean).join(', ');
   }
-  
+
   return name;
+}
+
+/** 展开整段类型文本的别名（用于数组/可选等分类判断），带循环保护 */
+function expandAlias(typeText: string, aliases?: ReadonlyMap<string, string>, depth = 0): string {
+  if (!typeText || !aliases || depth > 8) return typeText;
+  const target = aliases.get(typeText.trim());
+  if (target === undefined || target.trim() === typeText.trim()) return typeText;
+  return expandAlias(target, aliases, depth + 1);
 }
 
 /** 拆分泛型参数（处理嵌套泛型） */
@@ -115,11 +180,30 @@ function splitGenericParams(params: string): string[] {
   return result;
 }
 
-// 判断类型是否是数组
-function isArrayType(typeText: string): boolean {
-  return typeText.includes('[]') || 
-         (typeText.startsWith('Array<') && typeText.endsWith('>')) ||
-         (typeText.startsWith('ReadonlyArray<') && typeText.endsWith('>'));
+/** 按顶层分隔符切分（忽略 <> () [] 内部的同名符号），用于联合类型 */
+function splitTopLevel(text: string, sep: string): string[] {
+  const result: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const char of text) {
+    if (char === '<' || char === '(' || char === '[') depth++;
+    else if (char === '>' || char === ')' || char === ']') depth--;
+    if (char === sep && depth === 0) {
+      result.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+// 判断类型是否是集合容器（数组 / Set / Map 等），用于聚合关系
+const COLLECTION_PREFIX = /^(Array|ReadonlyArray|Set|ReadonlySet|WeakSet|Map|ReadonlyMap|WeakMap)</;
+function isCollectionType(typeText: string): boolean {
+  const t = typeText.trim();
+  return t.includes('[]') || COLLECTION_PREFIX.test(t);
 }
 
 // 判断类型是否是可选的
@@ -156,9 +240,15 @@ function isUserType(typeName: string, knownTypes: Set<string>): boolean {
 
 // 从类型文本中提取所有用户定义的类型（用于关系生成，支持联合类型拆分）
 // excluded：当前作用域内的泛型参数名（它们遮蔽同名类，不应产生关系）
-function extractUserTypes(typeText: string, knownTypes: Set<string>, excluded?: Set<string>): string[] {
+// aliases：类型别名展开表
+function extractUserTypes(
+  typeText: string,
+  knownTypes: Set<string>,
+  excluded?: Set<string>,
+  aliases?: ReadonlyMap<string, string>,
+): string[] {
   if (!typeText) return [];
-  const cleaned = cleanTypeName(typeText);
+  const cleaned = cleanTypeName(typeText, aliases);
   if (!cleaned) return [];
   
   // cleanTypeName 可能返回逗号分隔的多个类型（联合类型、Map 等）
@@ -172,29 +262,92 @@ function extractUserTypes(typeText: string, knownTypes: Set<string>, excluded?: 
   return [...new Set(result)];
 }
 
-export function parseCode(code: string): ParsedData {
-  return parseCodeWithKnownTypes(code, new Set());
+/** 重载签名去重：同名方法只保留一条，优先带方法体的实现签名 */
+function createMethodCollector(members: Member[]) {
+  const indexByName = new Map<string, number>();
+  return (member: Member, hasBody: boolean) => {
+    const idx = indexByName.get(member.name);
+    if (idx === undefined) {
+      indexByName.set(member.name, members.length);
+      members.push(member);
+    } else if (hasBody) {
+      members[idx] = member;
+    }
+  };
+}
+
+export interface TypeInfo {
+  types: Set<string>;
+  aliases: Map<string, string>;
+  /** 本文件引入的本地名字（import 绑定名，含 `as` 重命名）；用于识别重命名引用 */
+  imports: Set<string>;
+  /** 语法错误信息（类型错误不算，只关心解析不了的代码） */
+  errors: string[];
+}
+
+/** 扫一个源文件的声明：类型名 + 类型别名表 + import 绑定名 + 语法错误 */
+function collectFromSourceFile(sf: any): TypeInfo {
+  const types = new Set<string>();
+  const aliases = new Map<string, string>();
+  const imports = new Set<string>();
+  for (const node of flattenStatements(sf)) {
+    if (ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isEnumDeclaration(node)) {
+      if (node.name) types.add(node.name.text);
+    } else if (ts.isTypeAliasDeclaration(node) && node.name && node.type) {
+      aliases.set(node.name.text, node.type.getText(sf));
+    } else if (ts.isImportDeclaration(node) && node.importClause) {
+      const clause = node.importClause;
+      if (clause.name) imports.add(clause.name.text); // import X from '...'
+      const bindings = clause.namedBindings;
+      if (bindings) {
+        if (ts.isNamespaceImport(bindings)) {
+          imports.add(bindings.name.text); // import * as NS from '...'
+        } else if (ts.isNamedImports(bindings)) {
+          // import { A, B as C } from '...'  -> 本地名是 el.name.text
+          bindings.elements.forEach((el: any) => { if (el.name) imports.add(el.name.text); });
+        }
+      }
+    }
+  }
+  const errors: string[] = [];
+  for (const d of sf.parseDiagnostics || []) {
+    errors.push(ts.flattenDiagnosticMessageText(d.messageText, ' '));
+  }
+  return { types, aliases, imports, errors };
+}
+
+/** 供多文件合并的第一趟使用：先收集全部类型名与别名，再做第二趟解析 */
+export function collectTypeInfo(code: string, fileName?: string): TypeInfo {
+  return collectFromSourceFile(createSourceFile(code, fileName));
+}
+
+export function parseCode(code: string, fileName?: string): ParsedData {
+  return parseCodeWithKnownTypes(code, new Set(), fileName);
 }
 
 /** 带预设类型的解析（用于跨文件） */
-export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>): ParsedData {
-  const sf = ts.createSourceFile('input.ts', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+export function parseCodeWithKnownTypes(
+  code: string,
+  externalTypes: Set<string>,
+  fileName?: string,
+  externalAliases?: ReadonlyMap<string, string>,
+): ParsedData {
+  const sf = createSourceFile(code, fileName);
   const classes: ClassInfo[] = [];
   const relations: Relation[] = [];
+  const local = collectFromSourceFile(sf);
   const knownTypes = new Set<string>(externalTypes); // 包含外部类型
-
-  // 第一遍：收集本文件类型名称
-  ts.forEachChild(sf, (node: any) => {
-    if (ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node) || 
-        ts.isEnumDeclaration(node)) {
-      if (node.name) knownTypes.add(node.name.text);
-    }
-  });
+  local.types.forEach(t => knownTypes.add(t));
+  // 别名表：外部（其它文件）打底，本文件覆盖
+  const aliases = new Map<string, string>(externalAliases || []);
+  local.aliases.forEach((target, name) => aliases.set(name, target));
+  const statements = flattenStatements(sf);
 
   // 第二遍：解析所有类/接口/枚举（不处理关系）
-  ts.forEachChild(sf, (node: any) => {
+  statements.forEach((node: any) => {
     if (ts.isInterfaceDeclaration(node)) {
       const members: Member[] = [];
+      const addMethod = createMethodCollector(members);
       
       node.members.forEach((m: any) => {
         if (ts.isPropertySignature(m)) {
@@ -207,13 +360,13 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
           });
         } else if (ts.isMethodSignature(m)) {
           const params = m.parameters.map((p: any) => p.getText(sf)).join(', ');
-          members.push({
+          addMethod({
             kind: 'method',
             modifier: '+',
             name: m.name.getText(sf),
             type: getReturnType(m, sf),
             params
-          });
+          }, false);
         }
       });
 
@@ -227,6 +380,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
     }
     else if (ts.isClassDeclaration(node) && node.name) {
       const members: Member[] = [];
+      const addMethod = createMethodCollector(members);
       const isAbstract = !!(ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Abstract);
 
       node.members.forEach((m: any) => {
@@ -296,17 +450,17 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
               });
             }
           });
-          members.push({
+          addMethod({
             kind: 'method',
             modifier: '+',
             name: 'constructor',
             type: '',
             params: params.join(', '),
             isStatic: false
-          });
+          }, !!m.body);
         } else if (ts.isMethodDeclaration(m)) {
           const params = m.parameters.map((p: any) => p.getText(sf)).join(', ');
-          members.push({
+          addMethod({
             kind: 'method',
             modifier: mod,
             name: m.name.getText(sf),
@@ -314,7 +468,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
             params,
             isStatic,
             isAbstract: isAbstractMember
-          });
+          }, !!m.body);
         } else if (ts.isGetAccessorDeclaration(m) || ts.isSetAccessorDeclaration(m)) {
           members.push({
             kind: 'method',
@@ -359,7 +513,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
   });
 
   // 第三遍：统一处理关系（此时所有类都已收集完成）
-  ts.forEachChild(sf, (node: any) => {
+  statements.forEach((node: any) => {
     if (ts.isInterfaceDeclaration(node)) {
       // 接口继承
       if (node.heritageClauses) {
@@ -381,7 +535,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
       node.members.forEach((m: any) => {
         if (ts.isPropertySignature(m)) {
           const typeText = m.type?.getText(sf) || '';
-          for (const typeName of extractUserTypes(typeText, knownTypes, typeParams)) {
+          for (const typeName of extractUserTypes(typeText, knownTypes, typeParams, aliases)) {
             if (typeName === node.name.text) continue;
             const fields = associationMap.get(typeName) || [];
             fields.push(m.name.getText(sf));
@@ -399,6 +553,22 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
           label: fields.length > 1 ? fields.join(', ') : undefined
         });
       });
+
+      // 继承泛型的类型实参 -> 依赖
+      if (node.heritageClauses) {
+        node.heritageClauses.forEach((h: any) => {
+          h.types.forEach((t: any) => {
+            for (const arg of t.typeArguments || []) {
+              for (const argType of extractUserTypes(arg.getText(sf), knownTypes, typeParams, aliases)) {
+                if (argType === node.name.text) continue;
+                if (!relations.find(r => r.from === node.name.text && r.to === argType)) {
+                  relations.push({ from: node.name.text, to: argType, type: 'dependency' });
+                }
+              }
+            }
+          });
+        });
+      }
     }
     else if (ts.isClassDeclaration(node) && node.name) {
       // 类级泛型参数：这些名称遮蔽同名类，不应产生关系
@@ -414,6 +584,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
       };
 
       // 继承/实现
+      const heritageTypeArgs = new Set<string>();
       if (node.heritageClauses) {
         node.heritageClauses.forEach((h: any) => {
           const type = h.token === ts.SyntaxKind.ExtendsKeyword ? 'extends' : 'implements';
@@ -421,6 +592,12 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
             const targetName = t.expression.text;
             if (targetName && knownTypes.has(targetName)) {
               relations.push({ from: node.name.text, to: targetName, type });
+            }
+            // Base<Foo> / Repository<User> 的类型实参 -> 依赖
+            for (const arg of t.typeArguments || []) {
+              for (const argType of extractUserTypes(arg.getText(sf), knownTypes, classTypeParams, aliases)) {
+                heritageTypeArgs.add(argType);
+              }
             }
           });
         });
@@ -449,7 +626,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
             }
           }
           
-          const types = extractUserTypes(typeText, knownTypes, classTypeParams);
+          const types = extractUserTypes(typeText, knownTypes, classTypeParams, aliases);
           types.forEach(t => propertyTypes.add(t));
           propertyEntries.push({
             fieldName: m.name.getText(sf),
@@ -472,7 +649,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
             if (hasModifier) {
               // 有修饰符 -> 参数属性，视为字段（关联），不是依赖
               constructorParamNames.add(p.name.getText(sf));
-              const types = extractUserTypes(pType, knownTypes, classTypeParams);
+              const types = extractUserTypes(pType, knownTypes, classTypeParams, aliases);
               types.forEach(t => propertyTypes.add(t));
               propertyEntries.push({
                 fieldName: p.name.getText(sf),
@@ -489,13 +666,14 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
       const relationMap = new Map<string, { type: 'association' | 'aggregation' | 'composition', fields: string[], multiplicity: string }>();
       
       for (const entry of propertyEntries) {
-        const typeNames = extractUserTypes(entry.typeText, knownTypes, classTypeParams);
+        const typeNames = extractUserTypes(entry.typeText, knownTypes, classTypeParams, aliases);
         for (const typeName of typeNames) {
           if (typeName === node.name.text) continue;
           
           const fieldName = entry.fieldName;
-          const isArray = isArrayType(entry.typeText);
-          const isOptional = entry.isOptional || isOptionalType(entry.typeText);
+          const effectiveType = expandAlias(entry.typeText, aliases);
+          const isArray = isCollectionType(effectiveType);
+          const isOptional = entry.isOptional || isOptionalType(effectiveType);
           const isNew = entry.isNew;
           
           let relType: 'association' | 'aggregation' | 'composition';
@@ -553,7 +731,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
             if (constructorParamNames.has(paramName)) return;
             
             const paramType = p.type?.getText(sf) || '';
-            for (const typeName of extractUserTypes(paramType, knownTypes, excludeParamsOf(m))) {
+            for (const typeName of extractUserTypes(paramType, knownTypes, excludeParamsOf(m), aliases)) {
               if (typeName !== node.name.text && !propertyTypes.has(typeName)) {
                 dependencyTypes.add(typeName);
               }
@@ -563,7 +741,7 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
         
         // 返回值类型也可能产生依赖
         if (ts.isMethodDeclaration(m) && m.type) {
-          for (const returnType of extractUserTypes(m.type.getText(sf), knownTypes, excludeParamsOf(m))) {
+          for (const returnType of extractUserTypes(m.type.getText(sf), knownTypes, excludeParamsOf(m), aliases)) {
             if (returnType !== node.name.text && !propertyTypes.has(returnType)) {
               dependencyTypes.add(returnType);
             }
@@ -604,6 +782,11 @@ export function parseCodeWithKnownTypes(code: string, externalTypes: Set<string>
         }
       });
       
+      // 继承泛型的类型实参 -> 依赖
+      heritageTypeArgs.forEach(typeName => {
+        if (typeName !== node.name.text) dependencyTypes.add(typeName);
+      });
+
       dependencyTypes.forEach(typeName => {
         const existingRel = relations.find(r => r.from === node.name.text && r.to === typeName);
         if (!existingRel) {

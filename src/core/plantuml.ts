@@ -108,32 +108,43 @@ export function formatMergedPlantUML(allParsed: Map<string, ParsedData>, classPa
   const uniqueRelations: Relation[] = [];
   const relationKeys = new Set<string>();
   allRelations.forEach(r => {
-    const key = `${r.from}-${r.type}-${r.to}`;
+    const key = `${r.from}\u0000${r.type}\u0000${r.to}`;
     if (!relationKeys.has(key)) {
       relationKeys.add(key);
       uniqueRelations.push(r);
     }
   });
 
+  // 类身份（可能带包限定）-> PlantUML 别名。别名必须是合法标识符且全局唯一。
+  const aliasByClass = new Map<string, string>();
+  const usedAliases = new Set<string>();
+  const makeAlias = (name: string): string => {
+    let base = name.replace(/[^A-Za-z0-9_]/g, '_');
+    if (!/^[A-Za-z_]/.test(base)) base = `_${base}`;
+    let alias = base;
+    let i = 2;
+    while (usedAliases.has(alias)) alias = `${base}_${i++}`;
+    usedAliases.add(alias);
+    return alias;
+  };
+
   // 按包输出类
   allParsed.forEach((parsed, packageName) => {
     text += `package "${safeQuoted(packageName)}" {\n`;
 
     parsed.classes.forEach(c => {
-      // 跨文件同名类只输出一次：PlantUML 中 as 别名必须全局唯一，
-      // 否则会出现重复声明导致渲染歧义
-      if (classPackageMap.size > 0 && classPackageMap.get(c.name) !== packageName) {
-        return;
-      }
+      const alias = makeAlias(c.name);
+      aliasByClass.set(c.name, alias);
+      const title = c.displayName || c.name;
 
       if (c.isEnum) {
-        text += `  enum "${c.name}" as ${c.name} {\n`;
+        text += `  enum "${safeQuoted(title)}" as ${alias} {\n`;
       } else if (c.isInterface) {
-        text += `  interface "${c.name}" as ${c.name} {\n`;
+        text += `  interface "${safeQuoted(title)}" as ${alias} {\n`;
       } else if (c.isAbstract) {
-        text += `  abstract class "${c.name}" as ${c.name} {\n`;
+        text += `  abstract class "${safeQuoted(title)}" as ${alias} {\n`;
       } else {
-        text += `  class "${c.name}" as ${c.name} {\n`;
+        text += `  class "${safeQuoted(title)}" as ${alias} {\n`;
       }
 
       const props = c.members.filter(m => m.kind === 'property');
@@ -149,10 +160,14 @@ export function formatMergedPlantUML(allParsed: Map<string, ParsedData>, classPa
     text += '}\n\n';
   });
 
-  // 输出所有关系
+  // 输出所有关系（端点换成唯一别名）
   text += "' 关系\n";
   uniqueRelations.forEach(r => {
-    text += formatRelation(r) + '\n';
+    text += formatRelation({
+      ...r,
+      from: aliasByClass.get(r.from) ?? r.from,
+      to: aliasByClass.get(r.to) ?? r.to,
+    }) + '\n';
   });
 
   return text + '\n@enduml';

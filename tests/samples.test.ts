@@ -59,7 +59,8 @@ describe('默认示例项目', () => {
 
     // 依赖
     expect(relation('UserService', 'User')?.type).toBe('dependency');
-    expect(relation('OrderService', 'Order')?.type).toBe('dependency');
+    // orders: Repository<Order> 使 OrderService 先与 Order 建立关联，依赖不再重复生成
+    expect(relation('OrderService', 'Order')?.type).toBe('association');
     expect(relation('Order', 'OrderError')?.type).toBe('dependency');
   });
 });

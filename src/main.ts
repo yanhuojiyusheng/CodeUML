@@ -1,6 +1,6 @@
 /** 主入口：只负责组装 core 能力与 ui 交互，并启动应用 */
 
-import { parseFilesWithCrossFileTypes, mergeParsedData } from './core/merge';
+import { parseFilesWithCrossFileTypes, mergeParsedData, ParseReport } from './core/merge';
 import { layoutDiagram, setLayoutConfig } from './core/layout';
 import { renderSVG, setDisplayConfig } from './core/svg';
 import { generateDrawioXML } from './core/drawio';
@@ -9,6 +9,7 @@ import { RELATION_MODES, filterRelationsByMode } from './core/relations';
 import { ParsedData } from './core/types';
 
 import { byId } from './ui/dom';
+import { formatWarnings } from './ui/warnings';
 import { createTabsController, packageName } from './ui/tabs';
 import { createHighlighter } from './ui/highlight';
 import { createSplitPanes } from './ui/panes';
@@ -30,6 +31,7 @@ const foldToggleBtn = byId<HTMLButtonElement>('fold-toggle');
 const visibilityToggleBtn = byId<HTMLButtonElement>('visibility-toggle');
 const sidebarResizer = byId<HTMLDivElement>('sidebar-resizer');
 const rightPane = byId<HTMLDivElement>('right-pane');
+const warningsEl = byId<HTMLDivElement>('warnings');
 const dividerEl = byId<HTMLDivElement>('divider');
 const maxPropsEl = byId<HTMLInputElement>('max-props');
 const maxMethodsEl = byId<HTMLInputElement>('max-methods');
@@ -55,12 +57,20 @@ const zoom = createZoom({
 createPan(diagramEl);
 
 // ---------------- 解析调度 ----------------
-/** 合并所有文件的解析结果（跨文件类型感知） */
-function mergeAllParsed(): Map<string, ParsedData> {
+/** 合并所有文件的解析结果（跨文件类型感知）；report 用于收集解析失败的文件 */
+function mergeAllParsed(report?: ParseReport): Map<string, ParsedData> {
   tabsController.syncActiveContent();
   return parseFilesWithCrossFileTypes(
-    tabsController.visibleTabs().map(tab => ({ name: packageName(tab), content: tab.content }))
+    tabsController.visibleTabs().map(tab => ({ name: packageName(tab), content: tab.content })),
+    report,
   );
+}
+
+/** 顶部警告条：解析失败 / 重名类 / 歧义引用（无警告时隐藏） */
+function renderWarnings(failures: ParseReport['failures'], duplicates: ParseReport['duplicates'], ambiguous: ParseReport['ambiguous']) {
+  const html = formatWarnings({ failures, duplicates, ambiguous });
+  warningsEl.innerHTML = html;
+  warningsEl.hidden = html === '';
 }
 
 /** 更新所有视图（合并视图） */
@@ -70,8 +80,10 @@ function updateAll() {
     return;
   }
   try {
-    const allParsed = mergeAllParsed();
+    const report: ParseReport = { failures: [], duplicates: [], ambiguous: [] };
+    const allParsed = mergeAllParsed(report);
     const { merged, classPackageMap } = mergeParsedData(allParsed);
+    renderWarnings(report.failures, report.duplicates, report.ambiguous);
 
     const diagram = layoutDiagram(merged);
 
