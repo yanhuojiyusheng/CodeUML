@@ -371,4 +371,21 @@ describe('tsconfig paths（按引用方就近匹配）', () => {
     buildWithConfigs(files, report, []);
     expect(report.ambiguous.length).toBeGreaterThan(0);
   });
+
+  test('extends 支持包名形式（走 package.json 的 name）', () => {
+    const report = emptyReport();
+    const merged = buildWithConfigs([
+      { name: 'packages/shared/src/types.ts', content: 'export interface Shared { a: string; }' },
+      { name: 'packages/other/src/types.ts', content: 'export interface Shared { b: string; }' },
+      { name: 'packages/a/src/use.ts', content: 'import type { Shared } from "@shared/types.ts";\nexport interface UseA { s: Shared; }' },
+    ], report, [
+      { name: 'packages/config/package.json', content: JSON.stringify({ name: '@org/tsconfig' }) },
+      { name: 'packages/config/tsconfig.base.json', content: JSON.stringify({ compilerOptions: { baseUrl: '.', paths: { '@shared/*': ['../shared/src/*'] } } }) },
+      tsconfig('packages/a', { extends: '@org/tsconfig/tsconfig.base.json' }),
+    ]);
+    const rel = merged.relations.find(r => r.from === 'UseA');
+    expect(rel).toBeDefined();
+    expect(merged.classes.find(c => c.name === rel!.to)?.packageName).toBe('packages/shared/src/types.ts');
+    expect(report.ambiguous).toEqual([]);
+  });
 });

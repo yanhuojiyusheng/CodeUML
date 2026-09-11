@@ -139,11 +139,21 @@ interface ResolvedTsconfig {
   paths: Record<string, string[]> | null;   // 值已归一成虚拟绝对路径
 }
 
-/** `extends` 的引用路径（仅支持相对路径） */
-function resolveConfigRef(fromName: string, ref: string): string | null {
-  if (!ref.startsWith('.')) return null; // 包名形式的 extends 不支持
-  const base = joinPath(dirname(fromName), ref);
-  return base.toLowerCase().endsWith('.json') ? base : `${base}.json`;
+/** `extends` 的引用路径：相对路径，或包名形式（@scope/pkg/xxx.json） */
+function resolveConfigRef(
+  fromName: string,
+  ref: string,
+  packageDirs: ReadonlyMap<string, string>,
+): string | null {
+  const withJson = (p: string) => (p.toLowerCase().endsWith('.json') ? p : `${p}.json`);
+
+  if (ref.startsWith('.')) return withJson(joinPath(dirname(fromName), ref));
+
+  // 包名形式：靠 package.json 的 name 找到包目录，再拼上子路径
+  for (const [name, dir] of packageDirs) {
+    if (ref.startsWith(name + '/')) return withJson(joinPath(dir, ref.slice(name.length + 1)));
+  }
+  return null;
 }
 
 /**
@@ -153,6 +163,18 @@ function resolveConfigRef(fromName: string, ref: string): string | null {
 function loadTsconfigs(configs: ConfigFile[]): ResolvedTsconfig[] {
   const contents = new Map(configs.map(c => [c.name, c.content]));
   const cache = new Map<string, ResolvedTsconfig | null>();
+
+  // package.json 的 name -> 包目录，供 `extends: "@scope/pkg/xxx.json"` 使用
+  const packageDirs = new Map<string, string>();
+  for (const cfg of configs) {
+    if (!/(^|\/)package\.json$/i.test(cfg.name)) continue;
+    try {
+      const name = JSON.parse(cfg.content)?.name;
+      if (typeof name === 'string' && name) packageDirs.set(name, dirname(cfg.name));
+    } catch {
+      // 忽略非法 JSON
+    }
+  }
 
   const load = (name: string, seen: Set<string>): ResolvedTsconfig | null => {
     if (cache.has(name)) return cache.get(name)!;
@@ -169,7 +191,7 @@ function loadTsconfigs(configs: ConfigFile[]): ResolvedTsconfig[] {
 
     let inherited: ResolvedTsconfig | null = null;
     if (typeof json?.extends === 'string') {
-      const ref = resolveConfigRef(name, json.extends);
+      const ref = resolveConfigRef(name, json.extends, packageDirs);
       if (ref) inherited = load(ref, seen);
     }
 
