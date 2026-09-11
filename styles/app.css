@@ -13,10 +13,18 @@ button:hover{background:#1a8fe8}
 button.danger{background:#d73a49}
 button.danger:hover{background:#e5534b}
 main{flex:1;display:flex;overflow:hidden}
-/* 解析警告条：解析失败的文件 + 同名类冲突 */
-#warnings{flex:0 0 auto;max-height:30vh;overflow:auto;background:#fff8e1;border-bottom:1px solid #f0d68a;color:#7a5b00;font-size:12px;padding:8px 16px;line-height:1.6}
+/* 解析警告条：解析失败 / 重名类 / 歧义引用；可折叠可关闭 */
+#warnings{flex:0 0 auto;background:#fff8e1;border-bottom:1px solid #f0d68a;color:#7a5b00;font-size:12px;line-height:1.6}
 #warnings[hidden]{display:none}
+#warnings-head{display:flex;align-items:center;gap:6px;padding:4px 10px}
+#warnings-summary{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#warnings-toggle,#warnings-close{background:none;border:none;color:#7a5b00;cursor:pointer;font-size:12px;padding:2px 6px;border-radius:3px;line-height:1}
+#warnings-toggle:hover,#warnings-close:hover{background:#00000014;color:#000}
+#warnings-body{max-height:24vh;overflow:auto;padding:0 16px 8px}
+#warnings.collapsed #warnings-body{display:none}
 #warnings .warn-title{font-weight:600;margin-bottom:2px}
+#warnings .warn-title.notice{font-weight:400;color:#9a8b63}
+#warnings .warn-title.notice + ul{color:#9a8b63}
 #warnings ul{margin:0 0 6px 18px}
 #warnings li{margin:1px 0}
 #warnings code{background:#0000000d;padding:0 3px;border-radius:3px;font-family:'Fira Code','Cascadia Code',monospace}

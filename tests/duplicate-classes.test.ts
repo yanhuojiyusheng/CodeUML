@@ -124,6 +124,8 @@ describe('引用解析：无 import 的歧义回退', () => {
     expect(rels.map(r => pkgOf(merged, r.to)).sort()).toEqual(['src/a.ts', 'src/b.ts']);
 
     expect(report.ambiguous).toHaveLength(1);
+    expect(report.ambiguous[0].file).toBe('src/app.ts');
+    expect(report.ambiguous[0].from).toBe('App');
     expect(report.ambiguous[0].to).toBe('Config');
     expect([...report.ambiguous[0].candidates].sort()).toEqual(['src/a.ts', 'src/b.ts']);
   });

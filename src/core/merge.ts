@@ -15,8 +15,8 @@ export interface ParseReport {
   failures: { name: string; message: string }[];
   /** 跨包同名类（已按包区分身份，这里只是告知用户） */
   duplicates: { name: string; packages: string[] }[];
-  /** 无法确定目标的引用（没提供 import），已连接到全部候选 */
-  ambiguous: { from: string; to: string; candidates: string[] }[];
+  /** 无法确定目标的引用（没提供 import），已连接到全部候选。file 是出现该引用的文件 */
+  ambiguous: { file: string; from: string; to: string; candidates: string[] }[];
 }
 
 /** 解析结果：每个包的类与关系（类名在重名时已加包限定，全局唯一） */
@@ -164,7 +164,7 @@ export function parseFilesWithCrossFileTypes(
         resolvedRelations.push({ ...r, from, to: identityOf(t.pkg, t.name, duplicatedNames) });
       });
       if (targets.length > 1) {
-        report?.ambiguous.push({ from: r.from, to: r.to, candidates: targets.map(t => t.pkg) });
+        report?.ambiguous.push({ file: pkg, from: r.from, to: r.to, candidates: targets.map(t => t.pkg) });
       }
     });
 

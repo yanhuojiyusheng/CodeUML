@@ -6,10 +6,11 @@ import { renderSVG, setDisplayConfig } from './core/svg';
 import { generateDrawioXML } from './core/drawio';
 import { formatMergedPlantUML } from './core/plantuml';
 import { RELATION_MODES, filterRelationsByMode } from './core/relations';
+import { splitSourcePath } from './core/utils';
 import { ParsedData } from './core/types';
 
 import { byId } from './ui/dom';
-import { formatWarnings } from './ui/warnings';
+import { formatWarnings, formatWarningSummary, warningSignature, hasProblems, WarningInput } from './ui/warnings';
 import { createTabsController, packageName } from './ui/tabs';
 import { createHighlighter } from './ui/highlight';
 import { createSplitPanes } from './ui/panes';
@@ -32,6 +33,10 @@ const visibilityToggleBtn = byId<HTMLButtonElement>('visibility-toggle');
 const sidebarResizer = byId<HTMLDivElement>('sidebar-resizer');
 const rightPane = byId<HTMLDivElement>('right-pane');
 const warningsEl = byId<HTMLDivElement>('warnings');
+const warningsSummaryEl = byId<HTMLSpanElement>('warnings-summary');
+const warningsBodyEl = byId<HTMLDivElement>('warnings-body');
+const warningsToggleBtn = byId<HTMLButtonElement>('warnings-toggle');
+const warningsCloseBtn = byId<HTMLButtonElement>('warnings-close');
 const dividerEl = byId<HTMLDivElement>('divider');
 const maxPropsEl = byId<HTMLInputElement>('max-props');
 const maxMethodsEl = byId<HTMLInputElement>('max-methods');
@@ -66,11 +71,53 @@ function mergeAllParsed(report?: ParseReport): Map<string, ParsedData> {
   );
 }
 
-/** 顶部警告条：解析失败 / 重名类 / 歧义引用（无警告时隐藏） */
-function renderWarnings(failures: ParseReport['failures'], duplicates: ParseReport['duplicates'], ambiguous: ParseReport['ambiguous']) {
-  const html = formatWarnings({ failures, duplicates, ambiguous });
-  warningsEl.innerHTML = html;
-  warningsEl.hidden = html === '';
+// 警告条状态：记录上一次的内容指纹与已关闭的指纹
+let lastWarningInput: WarningInput | null = null;
+let lastWarningSignature = '';
+let dismissedWarnings = '';
+
+function setWarningsCollapsed(collapsed: boolean) {
+  warningsEl.classList.toggle('collapsed', collapsed);
+  warningsToggleBtn.textContent = collapsed ? '▸' : '▾';
+  warningsToggleBtn.title = collapsed ? '展开提示' : '折叠提示';
+}
+
+warningsToggleBtn.addEventListener('click', () => {
+  setWarningsCollapsed(!warningsEl.classList.contains('collapsed'));
+});
+
+warningsCloseBtn.addEventListener('click', () => {
+  dismissedWarnings = lastWarningInput ? warningSignature(lastWarningInput) : '';
+  warningsEl.hidden = true;
+});
+
+/**
+ * 顶部警告条：解析失败 / 歧义引用（⚠）与重名类（ℹ）。
+ * - 无警告时隐藏；被用户关闭后，仅当内容变化才重新弹出
+ * - 内容变化时才自动决定展开/折叠：有问题展开，只有提示则收成一行
+ * - 内容不变时保留用户的手动展开/折叠状态（否则每次编辑都会被重置）
+ */
+function renderWarnings(input: WarningInput) {
+  lastWarningInput = input;
+  const signature = warningSignature(input);
+
+  if (signature === '') {
+    warningsEl.hidden = true;
+    warningsBodyEl.innerHTML = '';
+    lastWarningSignature = '';
+    dismissedWarnings = '';
+    return;
+  }
+
+  warningsSummaryEl.textContent = formatWarningSummary(input);
+  warningsBodyEl.innerHTML = formatWarnings(input);
+
+  if (signature !== lastWarningSignature) {
+    lastWarningSignature = signature;
+    setWarningsCollapsed(!hasProblems(input));
+  }
+
+  warningsEl.hidden = signature === dismissedWarnings;
 }
 
 /** 更新所有视图（合并视图） */
@@ -83,7 +130,7 @@ function updateAll() {
     const report: ParseReport = { failures: [], duplicates: [], ambiguous: [] };
     const allParsed = mergeAllParsed(report);
     const { merged, classPackageMap } = mergeParsedData(allParsed);
-    renderWarnings(report.failures, report.duplicates, report.ambiguous);
+    renderWarnings({ failures: report.failures, duplicates: report.duplicates, ambiguous: report.ambiguous });
 
     const diagram = layoutDiagram(merged);
 
@@ -214,7 +261,7 @@ editorPane.addEventListener('drop', async (e) => {
   if (entries.length) {
     for (const entry of entries) {
       await collectTsFiles(entry, (path, content) => {
-        const { folder, name } = splitTsPath(path);
+        const { folder, name } = splitSourcePath(path);
         buffer.push({ name, content, folder });
         if (buffer.length >= CHUNK) flush();
       });
@@ -226,7 +273,8 @@ editorPane.addEventListener('drop', async (e) => {
         console.warn(`跳过非 TypeScript 文件: ${file.name}`);
         continue;
       }
-      buffer.push({ name: file.name.replace(/\.tsx?$/, ''), content: await file.text(), folder: '' });
+      // 保留扩展名：语义解析与 .tsx 的 ScriptKind 都依赖它
+      buffer.push({ name: file.name, content: await file.text(), folder: '' });
       if (buffer.length >= CHUNK) flush();
     }
   }
@@ -267,12 +315,7 @@ function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEn
   });
 }
 
-/** 'src/models/user.ts' -> { folder: 'src/models', name: 'user' } */
-function splitTsPath(p: string): { folder: string; name: string } {
-  const parts = p.split('/');
-  const name = (parts.pop() || 'untitled').replace(/\.tsx?$/, '');
-  return { folder: parts.join('/'), name };
-}
+/** 路径拆分见 core/utils 的 splitSourcePath（保留扩展名） */
 
 // ---------------- 代码输入 ----------------
 codeEl.addEventListener('input', scheduleUpdate);

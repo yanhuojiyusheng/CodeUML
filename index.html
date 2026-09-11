@@ -17,7 +17,14 @@
 <button onclick="exportSVG()">导出 SVG</button>
 <button onclick="exportPlantUML()">导出 PlantUML</button>
 </header>
-<div id="warnings" hidden></div>
+<div id="warnings" hidden>
+  <div id="warnings-head">
+    <button id="warnings-toggle" title="折叠提示">▾</button>
+    <span id="warnings-summary"></span>
+    <button id="warnings-close" title="关闭提示">✕</button>
+  </div>
+  <div id="warnings-body"></div>
+</div>
 <main>
 <div id="file-sidebar">
   <div id="sidebar-header">
