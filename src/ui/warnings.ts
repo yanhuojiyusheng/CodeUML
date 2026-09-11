@@ -17,12 +17,22 @@ export interface WarningInput {
   ambiguous: { file: string; from: string; to: string; candidates: string[] }[];
 }
 
+/** 警告分类的 key（与 DOM 上的 data-section 对应） */
+export type WarningSectionKey = 'failures' | 'ambiguous' | 'duplicates';
+
 const hasWarnings = (w: WarningInput) =>
   w.failures.length > 0 || w.duplicates.length > 0 || w.ambiguous.length > 0;
 
 /** 是否需要用户处理（解析失败 / 歧义引用）。重名只是告知，不算问题。 */
 export function hasProblems(w: WarningInput): boolean {
   return w.failures.length > 0 || w.ambiguous.length > 0;
+}
+
+/** 各分类的默认折叠状态：⚠ 问题展开，ℹ 提示（重名）收起 */
+export function defaultCollapsedSections(w: WarningInput): Set<WarningSectionKey> {
+  const collapsed = new Set<WarningSectionKey>();
+  if (w.duplicates.length > 0) collapsed.add('duplicates');
+  return collapsed;
 }
 
 /**
@@ -54,37 +64,58 @@ export function warningSignature(w: WarningInput): string {
 const list = (items: string[]) =>
   '<ul>' + items.map(i => `<li>${i}</li>`).join('') + '</ul>';
 
-/** 明细 HTML；无警告返回 ''。问题（⚠）排在提示（ℹ）之前 */
-export function formatWarnings(w: WarningInput): string {
+/** 明细 HTML；无警告返回 ''。问题（⚠）排在提示（ℹ）之前，每一类各自可折叠 */
+export function formatWarnings(
+  w: WarningInput,
+  collapsed: ReadonlySet<WarningSectionKey> = new Set(),
+): string {
   if (!hasWarnings(w)) return '';
 
   const sections: string[] = [];
-  const problem = (title: string, items: string[]) =>
-    `<div class="warn-title">⚠ ${title}</div>` + list(items);
-  const notice = (title: string, items: string[]) =>
-    `<div class="warn-title notice">ℹ ${title}</div>` + list(items);
+
+  const section = (
+    key: WarningSectionKey,
+    severity: 'problem' | 'notice',
+    title: string,
+    items: string[],
+  ) => {
+    const isCollapsed = collapsed.has(key);
+    const classes = ['warn-section'];
+    if (severity === 'notice') classes.push('notice');
+    if (isCollapsed) classes.push('collapsed');
+    const icon = severity === 'notice' ? 'ℹ' : '⚠';
+    // 整行都是开关，点哪里都能折叠
+    sections.push(
+      `<div class="${classes.join(' ')}" data-section="${key}">` +
+        `<button type="button" class="warn-section-toggle" title="${isCollapsed ? '展开' : '折叠'}">` +
+          `${isCollapsed ? '▸' : '▾'} <span class="warn-section-title">${icon} ${title}</span>` +
+        '</button>' +
+        list(items) +
+      '</div>',
+    );
+  };
 
   if (w.failures.length > 0) {
-    sections.push(problem('解析失败（其余文件已正常解析）',
+    section('failures', 'problem', '解析失败（其余文件已正常解析）',
       w.failures.map(f => `<code>${escHtml(f.name)}</code>：${escHtml(f.message)}`),
-    ));
+    );
   }
 
   if (w.ambiguous.length > 0) {
-    sections.push(problem('引用无法确定目标（未提供 import，已连接到全部候选）',
+    section('ambiguous', 'problem', '引用无法确定目标（未提供 import，已连接到全部候选）',
       w.ambiguous.map(a =>
         `<code>${escHtml(a.file)}</code> 中的 <code>${escHtml(a.from)}</code> → <code>${escHtml(a.to)}</code>：候选 ` +
         a.candidates.map(p => `<code>${escHtml(p)}</code>`).join('、'),
       ),
-    ));
+    );
   }
 
   if (w.duplicates.length > 0) {
-    sections.push(notice('类名在多个包中定义（已按包分别绘制，引用按所在文件的 import 精确解析）',
+    section('duplicates', 'notice', '类名在多个包中定义（已按包分别绘制，引用按所在文件的 import 精确解析）',
       w.duplicates.map(d =>
         `<code>${escHtml(d.name)}</code>：${d.packages.map(p => `<code>${escHtml(p)}</code>`).join('、')}`,
       ),
-    ));
+    );
   }
 
   return sections.join('');

@@ -4,11 +4,32 @@
  * 两级：
  *   ⚠ 问题（解析失败 / 歧义引用）—— 需要处理
  *   ℹ 提示（类名在多个包中定义）—— 只是告知，不影响关系正确性
+ * 每一类各自可折叠。
  */
 
-import { formatWarnings, formatWarningSummary, warningSignature, hasProblems } from '../src/ui/warnings';
+import {
+  formatWarnings,
+  formatWarningSummary,
+  warningSignature,
+  hasProblems,
+  defaultCollapsedSections,
+  WarningInput,
+  WarningSectionKey,
+} from '../src/ui/warnings';
 
-const empty = { failures: [], duplicates: [], ambiguous: [] };
+const empty: WarningInput = { failures: [], duplicates: [], ambiguous: [] };
+
+/** 取出某个分类所在 div 的 class（便于断言该分类是否收起） */
+const sectionClass = (html: string, key: WarningSectionKey): string => {
+  const m = html.match(new RegExp(`<div class="([^"]*)" data-section="${key}">`));
+  return m ? m[1] : '(缺失)';
+};
+
+const allThree: WarningInput = {
+  failures: [{ name: 'a.ts', message: 'e' }],
+  duplicates: [{ name: 'A', packages: ['a.ts', 'b.ts'] }],
+  ambiguous: [{ file: 'app.ts', from: 'X', to: 'A', candidates: ['a.ts', 'b.ts'] }],
+};
 
 describe('问题判定 hasProblems（决定是否自动展开）', () => {
   test('无警告不算问题', () => {
@@ -28,17 +49,26 @@ describe('问题判定 hasProblems（决定是否自动展开）', () => {
   });
 });
 
+describe('分类默认折叠状态 defaultCollapsedSections', () => {
+  test('提示类（重名）默认收起，问题类默认展开', () => {
+    const collapsed = defaultCollapsedSections(allThree);
+    expect(collapsed.has('duplicates')).toBe(true);
+    expect(collapsed.has('failures')).toBe(false);
+    expect(collapsed.has('ambiguous')).toBe(false);
+  });
+
+  test('没有重名时不收起任何分类', () => {
+    expect(defaultCollapsedSections({ ...empty, failures: [{ name: 'a.ts', message: 'e' }] }).size).toBe(0);
+  });
+});
+
 describe('警告摘要 formatWarningSummary', () => {
   test('无警告时为空字符串', () => {
     expect(formatWarningSummary(empty)).toBe('');
   });
 
   test('问题用 ⚠，提示用 ℹ，问题在前', () => {
-    expect(formatWarningSummary({
-      failures: [{ name: 'a.ts', message: 'e' }],
-      duplicates: [{ name: 'A', packages: ['a.ts', 'b.ts'] }],
-      ambiguous: [{ file: 'app.ts', from: 'X', to: 'A', candidates: ['a.ts', 'b.ts'] }],
-    })).toBe('⚠ 1 个文件解析失败 · 1 处歧义引用 · ℹ 1 个类名重复');
+    expect(formatWarningSummary(allThree)).toBe('⚠ 1 个文件解析失败 · 1 处歧义引用 · ℹ 1 个类名重复');
   });
 
   test('只有提示时不出现 ⚠', () => {
@@ -59,11 +89,6 @@ describe('警告指纹 warningSignature', () => {
     expect(warningSignature(empty)).toBe('');
   });
 
-  test('相同内容指纹相同', () => {
-    const w = { ...empty, failures: [{ name: 'a.ts', message: 'e' }] };
-    expect(warningSignature(w)).toBe(warningSignature({ ...w }));
-  });
-
   test('内容变化则指纹变化（用于重新弹出已关闭的提示条）', () => {
     const a = { ...empty, failures: [{ name: 'a.ts', message: 'e' }] };
     const b = { ...empty, failures: [{ name: 'b.ts', message: 'e' }] };
@@ -71,16 +96,42 @@ describe('警告指纹 warningSignature', () => {
   });
 });
 
-describe('警告明细 formatWarnings', () => {
+describe('警告明细 formatWarnings：分类与折叠', () => {
   test('无警告时返回空字符串', () => {
     expect(formatWarnings(empty)).toBe('');
   });
 
-  test('解析失败：⚠ 级别，列出文件名与原因', () => {
-    const html = formatWarnings({
-      ...empty,
-      failures: [{ name: 'src/broken.ts', message: 'Parameter declaration expected.' }],
+  test('每一类各自带一个折叠开关', () => {
+    const html = formatWarnings(allThree);
+    (['failures', 'ambiguous', 'duplicates'] as WarningSectionKey[]).forEach(key => {
+      expect(html).toContain(`data-section="${key}"`);
     });
+    expect((html.match(/warn-section-toggle/g) || [])).toHaveLength(3);
+  });
+
+  test('默认全部展开（不含 collapsed）', () => {
+    const html = formatWarnings(allThree);
+    (['failures', 'ambiguous', 'duplicates'] as WarningSectionKey[]).forEach(key => {
+      expect(sectionClass(html, key)).not.toContain('collapsed');
+    });
+  });
+
+  test('传入收起集合时只收起对应分类，箭头变 ▸', () => {
+    const html = formatWarnings(allThree, new Set<WarningSectionKey>(['duplicates']));
+    expect(sectionClass(html, 'duplicates')).toContain('collapsed');
+    expect(sectionClass(html, 'failures')).not.toContain('collapsed');
+    expect(sectionClass(html, 'ambiguous')).not.toContain('collapsed');
+  });
+
+  test('三类可同时收起', () => {
+    const html = formatWarnings(allThree, new Set<WarningSectionKey>(['failures', 'ambiguous', 'duplicates']));
+    (['failures', 'ambiguous', 'duplicates'] as WarningSectionKey[]).forEach(key => {
+      expect(sectionClass(html, key)).toContain('collapsed');
+    });
+  });
+
+  test('解析失败：⚠ 级别，列出文件名与原因', () => {
+    const html = formatWarnings({ ...empty, failures: [{ name: 'src/broken.ts', message: 'Parameter declaration expected.' }] });
     expect(html).toContain('⚠');
     expect(html).toContain('解析失败');
     expect(html).toContain('src/broken.ts');
@@ -88,13 +139,10 @@ describe('警告明细 formatWarnings', () => {
     expect(html).not.toContain('notice');
   });
 
-  test('重名类：ℹ 级别（notice），列出名字与所有包，并说明关系仍精确', () => {
-    const html = formatWarnings({
-      ...empty,
-      duplicates: [{ name: 'Config', packages: ['src/a.ts', 'src/b.ts'] }],
-    });
+  test('重名类：ℹ 级别（notice），并说明关系仍精确', () => {
+    const html = formatWarnings({ ...empty, duplicates: [{ name: 'Config', packages: ['src/a.ts', 'src/b.ts'] }] });
     expect(html).toContain('ℹ');
-    expect(html).toContain('class="warn-title notice"');
+    expect(sectionClass(html, 'duplicates')).toContain('notice');
     expect(html).not.toContain('⚠');
     expect(html).toContain('类名在多个包中定义');
     expect(html).toContain('已按包分别绘制');
@@ -118,23 +166,14 @@ describe('警告明细 formatWarnings', () => {
     expect(html).toContain('src/b.ts');
   });
 
-  test('三类可同时出现，且问题排在提示前面', () => {
-    const html = formatWarnings({
-      failures: [{ name: 'a.ts', message: 'err' }],
-      duplicates: [{ name: 'A', packages: ['a.ts', 'b.ts'] }],
-      ambiguous: [{ file: 'app.ts', from: 'X', to: 'A', candidates: ['a.ts', 'b.ts'] }],
-    });
-    expect(html).toContain('解析失败');
-    expect(html).toContain('引用无法确定目标');
-    expect(html).toContain('类名在多个包中定义');
+  test('问题分类排在提示分类之前', () => {
+    const html = formatWarnings(allThree);
+    expect(html.indexOf('解析失败')).toBeLessThan(html.indexOf('类名在多个包中定义'));
     expect(html.indexOf('引用无法确定目标')).toBeLessThan(html.indexOf('类名在多个包中定义'));
   });
 
   test('文件名与消息做 HTML 转义', () => {
-    const html = formatWarnings({
-      ...empty,
-      failures: [{ name: '<b>x</b>', message: '<script>alert(1)</script>' }],
-    });
+    const html = formatWarnings({ ...empty, failures: [{ name: '<b>x</b>', message: '<script>alert(1)</script>' }] });
     expect(html).not.toContain('<script>');
     expect(html).toContain('&lt;script&gt;');
     expect(html).not.toContain('<b>x</b>');

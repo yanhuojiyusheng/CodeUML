@@ -22,9 +22,13 @@ main{flex:1;display:flex;overflow:hidden}
 #warnings-toggle:hover,#warnings-close:hover{background:#00000014;color:#000}
 #warnings-body{max-height:24vh;overflow:auto;padding:0 16px 8px}
 #warnings.collapsed #warnings-body{display:none}
-#warnings .warn-title{font-weight:600;margin-bottom:2px}
-#warnings .warn-title.notice{font-weight:400;color:#9a8b63}
-#warnings .warn-title.notice + ul{color:#9a8b63}
+#warnings .warn-section{margin-bottom:4px}
+#warnings .warn-section.collapsed ul{display:none}
+#warnings .warn-section-toggle{display:block;width:100%;text-align:left;background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:1px 4px;border-radius:3px}
+#warnings .warn-section-toggle:hover{background:#00000014;color:#000}
+#warnings .warn-section-title{font-weight:600}
+#warnings .warn-section.notice .warn-section-title{font-weight:400;color:#9a8b63}
+#warnings .warn-section.notice ul{color:#9a8b63}
 #warnings ul{margin:0 0 6px 18px}
 #warnings li{margin:1px 0}
 #warnings code{background:#0000000d;padding:0 3px;border-radius:3px;font-family:'Fira Code','Cascadia Code',monospace}

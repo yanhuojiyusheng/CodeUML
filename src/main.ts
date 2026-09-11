@@ -10,7 +10,7 @@ import { splitSourcePath } from './core/utils';
 import { ParsedData } from './core/types';
 
 import { byId } from './ui/dom';
-import { formatWarnings, formatWarningSummary, warningSignature, hasProblems, WarningInput } from './ui/warnings';
+import { formatWarnings, formatWarningSummary, warningSignature, hasProblems, defaultCollapsedSections, WarningInput, WarningSectionKey } from './ui/warnings';
 import { createTabsController, packageName } from './ui/tabs';
 import { createHighlighter } from './ui/highlight';
 import { createSplitPanes } from './ui/panes';
@@ -72,10 +72,11 @@ function mergeAllParsed(report?: ParseReport): Map<string, ParsedData> {
   );
 }
 
-// 警告条状态：记录上一次的内容指纹与已关闭的指纹
+// 警告条状态：记录上一次的内容指纹、已关闭的指纹、以及各分类的折叠状态
 let lastWarningInput: WarningInput | null = null;
 let lastWarningSignature = '';
 let dismissedWarnings = '';
+let collapsedSections = new Set<WarningSectionKey>();
 
 function setWarningsCollapsed(collapsed: boolean) {
   warningsEl.classList.toggle('collapsed', collapsed);
@@ -83,8 +84,25 @@ function setWarningsCollapsed(collapsed: boolean) {
   warningsToggleBtn.title = collapsed ? '展开提示' : '折叠提示';
 }
 
+// 整条提示条的折叠
 warningsToggleBtn.addEventListener('click', () => {
   setWarningsCollapsed(!warningsEl.classList.contains('collapsed'));
+});
+
+// 单个分类的折叠（事件委托：body 每次重绘，委托到稳定的父元素上）
+warningsBodyEl.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('.warn-section-toggle') as HTMLElement | null;
+  if (!btn) return;
+  const section = btn.closest('.warn-section') as HTMLElement | null;
+  const key = section?.dataset.section as WarningSectionKey | undefined;
+  if (!section || !key) return;
+
+  const collapsed = section.classList.toggle('collapsed');
+  if (collapsed) collapsedSections.add(key);
+  else collapsedSections.delete(key);
+  btn.title = collapsed ? '展开' : '折叠';
+  const arrow = btn.firstChild;
+  if (arrow && arrow.nodeType === Node.TEXT_NODE) arrow.textContent = collapsed ? '▸ ' : '▾ ';
 });
 
 warningsCloseBtn.addEventListener('click', () => {
@@ -95,7 +113,7 @@ warningsCloseBtn.addEventListener('click', () => {
 /**
  * 顶部警告条：解析失败 / 歧义引用（⚠）与重名类（ℹ）。
  * - 无警告时隐藏；被用户关闭后，仅当内容变化才重新弹出
- * - 内容变化时才自动决定展开/折叠：有问题展开，只有提示则收成一行
+ * - 内容变化时才自动决定展开/折叠（整条：有问题展开；分类：提示类收起）
  * - 内容不变时保留用户的手动展开/折叠状态（否则每次编辑都会被重置）
  */
 function renderWarnings(input: WarningInput) {
@@ -107,17 +125,19 @@ function renderWarnings(input: WarningInput) {
     warningsBodyEl.innerHTML = '';
     lastWarningSignature = '';
     dismissedWarnings = '';
+    collapsedSections = new Set();
     return;
   }
 
   warningsSummaryEl.textContent = formatWarningSummary(input);
-  warningsBodyEl.innerHTML = formatWarnings(input);
 
   if (signature !== lastWarningSignature) {
     lastWarningSignature = signature;
     setWarningsCollapsed(!hasProblems(input));
+    collapsedSections = defaultCollapsedSections(input);
   }
 
+  warningsBodyEl.innerHTML = formatWarnings(input, collapsedSections);
   warningsEl.hidden = signature === dismissedWarnings;
 }
 
