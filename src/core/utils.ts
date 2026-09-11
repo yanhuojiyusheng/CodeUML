@@ -53,6 +53,18 @@ export function isUnderPath(path: string, base: string): boolean {
   return path === base || path.startsWith(`${base}/`);
 }
 
+/**
+ * 把拖入的文件路径拆成「文件夹 + 文件名」。
+ * 必须保留扩展名：语义解析（TS 模块解析）靠它匹配 `import './args'`，
+ * 选择 ScriptKind（.tsx）也靠它。
+ *   'src/cli/args.ts' -> { folder: 'src/cli', name: 'args.ts' }
+ */
+export function splitSourcePath(path: string): { folder: string; name: string } {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  const name = parts.pop() || 'untitled';
+  return { folder: parts.join('/'), name };
+}
+
 /** 生成关系的唯一标识（用于高亮等场景） */
 export function relationKey(r: { from: string; type: string; to: string }): string {
   return `${r.from}|${r.type}|${r.to}`;
