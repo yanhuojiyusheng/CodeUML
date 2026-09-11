@@ -1,6 +1,7 @@
 /** PlantUML 文本格式化（从 main.ts 提取，便于单元测试） */
 
 import { Member, Relation, ParsedData } from './types';
+import { classTitle } from './utils';
 
 /** PlantUML 引号名中的双引号替换（PlantUML 无转义语法，用单引号代替） */
 function safeQuoted(name: string): string {
@@ -63,13 +64,13 @@ export function formatParsed(parsed: ParsedData, packageName?: string): string {
   parsed.classes.forEach(c => {
     const indent = packageName ? '  ' : '';
     if (c.isEnum) {
-      text += `${indent}enum "${c.name}" as ${c.name} {\n`;
+      text += `${indent}enum "${safeQuoted(classTitle(c))}" as ${c.name} {\n`;
     } else if (c.isInterface) {
-      text += `${indent}interface "${c.name}" as ${c.name} {\n`;
+      text += `${indent}interface "${safeQuoted(classTitle(c))}" as ${c.name} {\n`;
     } else if (c.isAbstract) {
-      text += `${indent}abstract class "${c.name}" as ${c.name} {\n`;
+      text += `${indent}abstract class "${safeQuoted(classTitle(c))}" as ${c.name} {\n`;
     } else {
-      text += `${indent}class "${c.name}" as ${c.name} {\n`;
+      text += `${indent}class "${safeQuoted(classTitle(c))}" as ${c.name} {\n`;
     }
 
     const props = c.members.filter(m => m.kind === 'property');
@@ -137,7 +138,7 @@ export function formatMergedPlantUML(allParsed: Map<string, ParsedData>, classPa
     parsed.classes.forEach(c => {
       const alias = makeAlias(c.name);
       aliasByClass.set(c.name, alias);
-      const title = c.displayName || c.name;
+      const title = classTitle(c);
 
       if (c.isEnum) {
         text += `  enum "${safeQuoted(title)}" as ${alias} {\n`;

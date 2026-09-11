@@ -1,7 +1,7 @@
 /** 布局引擎 - 优化的空间布局 */
 
 import { ParsedData, Box, Line, Diagram, ClassInfo, PackageBox } from './types';
-import { memberText, textWidth, LAYOUT } from './utils';
+import { memberText, textWidth, LAYOUT, classTitle } from './utils';
 import { selectVisibleProperties, selectVisibleMethods } from './members';
 
 // 显示配置（与 renderer 同步）
@@ -107,7 +107,7 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     const methsH = Math.max(displayMeths + (hasMoreMeths ? 1 : 0), 1) * LAYOUT.LINE_H;
     const h = stereotypeH + titleH + 1 + propsH + 1 + methsH + 8;
 
-    const title = c.displayName || c.name;
+    const title = classTitle(c);
     const lines = [
       ...(c.isInterface ? [{ text: '«interface»', cls: 'stereotype' }] : []),
       ...(c.isAbstract && !c.isInterface ? [{ text: '«abstract»', cls: 'stereotype' }] : []),

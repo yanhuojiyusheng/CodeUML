@@ -32,6 +32,16 @@ export function esc(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/** 类框标题：优先 displayName，并带上类型参数；重名时把 <T> 插在包名之前（Repo<T> (a.ts)） */
+export function classTitle(c: { name: string; displayName?: string; typeParams?: string[] }): string {
+  const base = c.displayName || c.name;
+  if (!c.typeParams || c.typeParams.length === 0) return base;
+  const params = `<${c.typeParams.join(', ')}>`;
+  // displayName 形如 "Repo (pkg)"，把类型参数插在包名之前可读性更好
+  const m = base.match(/^(.*?) (\([^)]*\))$/);
+  return m ? `${m[1]}${params} ${m[2]}` : `${base}${params}`;
+}
+
 /** 格式化成员文本 */
 export function memberText(m: Member): string {
   const staticStr = m.isStatic ? '{static} ' : '';

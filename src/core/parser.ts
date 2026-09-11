@@ -470,6 +470,7 @@ export function parseCodeWithKnownTypes(
 
       classes.push({
         name: node.name.text,
+        typeParams: (node.typeParameters || []).map((tp: any) => tp.name.getText(sf)),
         isInterface: true,
         isAbstract: false,
         isEnum: false,
@@ -583,6 +584,7 @@ export function parseCodeWithKnownTypes(
 
       classes.push({
         name: node.name.text,
+        typeParams: (node.typeParameters || []).map((tp: any) => tp.name.getText(sf)),
         isInterface: false,
         isAbstract,
         isEnum: false,

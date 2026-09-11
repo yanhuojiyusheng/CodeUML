@@ -15,6 +15,8 @@ export interface ClassInfo {
   name: string;
   /** 图上显示的名字；跨包同名时保留原名，name 则是加了包限定的唯一身份 */
   displayName?: string;
+  /** 类/接口声明的类型参数名（如 ['T'] 或 ['K', 'V']），仅用于标题显示 */
+  typeParams?: string[];
   isInterface: boolean;
   isAbstract: boolean;
   isEnum: boolean;
