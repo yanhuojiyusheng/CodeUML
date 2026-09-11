@@ -13,10 +13,10 @@
 CodeUML 读取真实的 **TypeScript / TSX** 源码，画出 **UML 类图**：类、接口、抽象类、枚举、泛型、
 `{readonly}` / `{static}` / `{abstract}` 成员，以及六种 UML 关系。拖入一个文件夹（整个 **monorepo** 也行）
 就会按文件夹分组成包，并用 TypeScript 编译器自身的模块解析把跨包引用定位到正确的类，最后可导出
-**Draw.io XML**、**SVG** 或 **PlantUML**。
+**SVG** 或 **PlantUML**。
 
 > 关键词：TypeScript 类图 · UML 类图生成器 · 代码生成类图 · 代码可视化 · 类图在线生成 ·
-> PlantUML 导出 · drawio 导出 · monorepo 多包项目 · 离线运行 · 自托管 · 开源
+> PlantUML 导出 · monorepo 多包项目 · 离线运行 · 自托管 · 开源
 
 ## 为什么做这个
 
@@ -27,7 +27,7 @@ CodeUML 读取真实的 **TypeScript / TSX** 源码，画出 **UML 类图**：�
 | **输入** | 你真实的 `.ts` / `.tsx` 文件 | 自己手写的图形源码 | 取决于插件 |
 | **跨文件引用** | ✅ 由 TypeScript 编译器解析（import、再导出、`tsconfig` 的 `paths`、workspace 包名） | ❌ 需要你手动连 | ⚠️ 参差不齐 |
 | **运行位置** | 浏览器里，代码不离开本机 | 浏览器 / 服务端 / 插件 | IDE 内部 |
-| **导出** | Draw.io XML、SVG、PlantUML | SVG / PNG 等 | 多数只能截图 |
+| **导出** | SVG、PlantUML | SVG / PNG 等 | 多数只能截图 |
 
 典型用途：接手陌生代码库时快速摸清结构、评审 PR 的结构性影响、写设计文档、
 检查包与包之间是不是依赖错了方向。
@@ -55,16 +55,16 @@ npm start          # 构建 + 启动服务 + 打开 http://localhost:3000
   `tsconfig` 的 `paths` 别名、来自 `package.json` 的 workspace 包名
 - 🧩 **多个包里同名类** —— 不会丢：两个类都画出来并带上包名区分，引用按 import 精确定位，
   真正无法判定的会在提示条里报出来（绝不静默乱猜）
-- 👁 **可见性** —— 用 👁 开关隐藏某个文件或文件夹，它会同时从类图、Draw.io XML、PlantUML 中排除
+- 👁 **可见性** —— 用 👁 开关隐藏某个文件或文件夹，它会同时从类图和 PlantUML 中排除
 - 🔍 **缩放、平移、高亮、关系强弱模式**
-- 📥 **导出** Draw.io XML、SVG、PlantUML
+- 📥 **导出** SVG、PlantUML
 - ⚪ 白色主题、**零运行时依赖**、完全**可离线**使用
 
 ## 使用
 
 1. 在左侧编辑区粘贴 TypeScript 代码，或把 `.ts` / `.tsx` 文件 / 整个文件夹拖进去。
 2. 右侧实时显示 UML 类图。
-3. 切换标签：**图表 / Draw.io XML / PlantUML**（后两者按需生成，切到那一页才算）。
+3. 切换标签：**图表 / PlantUML**（按需生成，切到那一页才算）。
 
 ### 文件栏
 
@@ -116,8 +116,8 @@ npm start          # 构建 + 启动服务 + 打开 http://localhost:3000
 可以：`npm run build` 之后直接用浏览器打开 `index.html`。TypeScript 编译器已经打包进
 `dist/typescript.min.js`，无需联网。
 
-**能导出 PlantUML / Draw.io 吗？**
-能，工具栏可导出 `.puml`、`.drawio` 和纯 SVG。**不支持 Mermaid**（Mermaid 是手写图形源码，见上面的对比表）。
+**能导出 PlantUML 吗？**
+能，工具栏可导出 `.puml` 和纯 SVG。**不支持 Mermaid**（Mermaid 是手写图形源码，见上面的对比表）。
 
 **已知限制**
 - 类型别名会被解析而不是画成独立节点；联合类型别名会展开为指向各成员的依赖关系。
@@ -145,7 +145,6 @@ CodeUML/
 │   │   ├── layout.ts       # 布局引擎
 │   │   ├── relations.ts    # 关系强弱分级与显示模式
 │   │   ├── svg.ts          # SVG 渲染器
-│   │   ├── drawio.ts       # Draw.io XML 导出器
 │   │   └── plantuml.ts     # PlantUML 文本生成
 │   │
 │   └── ui/                 # DOM 交互层
@@ -172,7 +171,6 @@ CodeUML/
 | `core/merge.ts` | 多文件合并：按包唯一化类身份、解析关系端点、产出诊断 |
 | `core/layout.ts` | 定位类框，并挑选接近正方形的包排布 |
 | `core/svg.ts` | 将布局渲染成 SVG（类框与关系箭头） |
-| `core/drawio.ts` | 生成 Draw.io 兼容的 mxfile XML |
 | `core/plantuml.ts` | 生成 PlantUML 文本 |
 | `core/members.ts` | 成员筛选规则（布局算高度与渲染画内容共用） |
 | `ui/*` | DOM 事件、文件栏、分栏、导出等交互 |

@@ -16,7 +16,6 @@
 import { parseFilesWithCrossFileTypes, mergeParsedData, SourceFile } from '../src/core/merge';
 import { formatMergedPlantUML } from '../src/core/plantuml';
 import { layoutDiagram } from '../src/core/layout';
-import { generateDrawioXML } from '../src/core/drawio';
 import { ParsedData, Relation } from '../src/core/types';
 import { validatePlantUML } from './helpers/plantuml-validator';
 
@@ -614,16 +613,16 @@ describe('多包合并 - 布局集成', () => {
     expect(aspect).toBeLessThan(2);
   });
 
-  test('同名类在 Draw.io 导出中只产生一个图形单元', () => {
+  test('同名类在布局里都产生自己的图形单元', () => {
     const { merged } = build([
       { name: 'v1', content: 'class User { name: string; }' },
       { name: 'v2', content: 'class User { id: number; }' },
       { name: 'app', content: 'class App { private u: User; }' },
     ]);
 
-    const xml = generateDrawioXML(layoutDiagram(merged));
+    const diagram = layoutDiagram(merged);
     // 3 个类框（App + 两个 User），2 条边（App 连到两个候选）
-    expect((xml.match(/vertex="1"/g) || [])).toHaveLength(3);
-    expect((xml.match(/edge="1"/g) || [])).toHaveLength(2);
+    expect(diagram.boxes).toHaveLength(3);
+    expect(diagram.lines).toHaveLength(2);
   });
 });

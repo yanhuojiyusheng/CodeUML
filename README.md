@@ -14,10 +14,10 @@ CodeUML reads real **TypeScript / TSX** source and draws a **UML class diagram**
 classes, interfaces, abstract classes, enums, generics, `{readonly}`/`{static}`/`{abstract}`
 members and all six UML relation types. Drop in a folder (a whole **monorepo** is fine) and it
 groups files into packages, resolves cross-package references with the TypeScript compiler's own
-module resolution, and exports to **Draw.io XML**, **SVG** or **PlantUML**.
+module resolution, and exports to **SVG** or **PlantUML**.
 
 > Keywords: typescript uml · uml class diagram generator · typescript class diagram ·
-> code to uml · typescript to plantuml · drawio export · code visualization · monorepo ·
+> code to uml · typescript to plantuml · code visualization · monorepo ·
 > ast parser · offline · self-hosted
 
 ## Why this exists
@@ -29,7 +29,7 @@ Existing options usually ask you to *describe* the diagram by hand:
 | **Input** | your actual `.ts` / `.tsx` files | a diagram you write yourself | whatever the plugin supports |
 | **Cross-file references** | ✅ resolved with the TypeScript compiler (imports, re-exports, `tsconfig` `paths`, workspace package names) | ❌ you wire it up manually | ⚠️ varies |
 | **Where it runs** | in the browser; your code never leaves the page | browser / server / plugin | inside the IDE |
-| **Export** | Draw.io XML, SVG, PlantUML | SVG / PNG / … | screenshots |
+| **Export** | SVG, PlantUML | SVG / PNG / … | screenshots |
 
 Typical uses: onboarding into an unfamiliar codebase, reviewing a PR's structural impact,
 writing design docs, or checking that your packages don't depend on the wrong things.
@@ -61,16 +61,16 @@ Requires **Node.js 18+**. Change the port with `PORT=8080 npm start`; log every 
   package-qualified title, references go to the right one, and anything genuinely ambiguous is
   reported (never silently guessed)
 - 👁 **Visibility** — hide a file or a folder with the 👁 toggle to exclude it from the diagram,
-  the Draw.io XML and the PlantUML output
+  the PlantUML output
 - 🔍 **Zoom & pan, highlighting, relation strength modes**
-- 📥 **Export** to Draw.io XML, SVG and PlantUML
+- 📥 **Export** to SVG and PlantUML
 - ⚪ Light theme, **zero runtime dependencies**, works fully **offline**
 
 ## Usage
 
 1. Paste TypeScript code into the left editor, or drop `.ts` / `.tsx` files / a folder onto it.
 2. The UML class diagram appears on the right in real time.
-3. Switch tabs: **Diagram / Draw.io XML / PlantUML** (the latter two are generated on demand).
+3. Switch tabs: **Diagram / PlantUML** (the latter is generated on demand).
 
 ### File sidebar
 
@@ -132,8 +132,8 @@ other `.ts` file.
 Yes: `npm run build`, then open `index.html` directly. The TypeScript compiler is vendored into
 `dist/typescript.min.js`, so no network access is needed.
 
-**Can I export to PlantUML or Draw.io?**
-Yes — exported from the toolbar as `.puml` / `.drawio`, plus plain SVG. Mermaid is *not*
+**Can I export to PlantUML?**
+Yes — exported from the toolbar as `.puml`, plus plain SVG. Mermaid is *not*
 supported (Mermaid diagrams are written by hand; see the comparison above).
 
 **Known limitations**
@@ -164,7 +164,6 @@ CodeUML/
 │   │   ├── layout.ts       # Layout engine
 │   │   ├── relations.ts    # Relation strength and display modes
 │   │   ├── svg.ts          # SVG renderer
-│   │   ├── drawio.ts       # Draw.io XML exporter
 │   │   └── plantuml.ts     # PlantUML text generator
 │   │
 │   └── ui/                 # DOM layer
@@ -191,7 +190,6 @@ CodeUML/
 | `core/merge.ts` | Multi-file merge: unique class identity per package, endpoint resolution, diagnostics |
 | `core/layout.ts` | Places classes and picks a near-square arrangement of packages |
 | `core/svg.ts` | Renders the layout to SVG (boxes and relation arrows) |
-| `core/drawio.ts` | Generates Draw.io-compatible mxfile XML |
 | `core/plantuml.ts` | Generates PlantUML text |
 | `core/members.ts` | Member selection rules (shared by layout height and rendering) |
 | `ui/*` | DOM events, file sidebar, split panes, exports |

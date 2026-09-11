@@ -2,12 +2,11 @@
  * 泛型类名在标题里显示 <T>
  *
  * 身份仍是裸名（别名/关系都用它），只有「标题」带类型参数，
- * 因此 SVG / Draw.io / PlantUML 三处一致。
+ * 因此 SVG 与 PlantUML 两处一致。
  */
 
 import { parseCode } from '../src/core/parser';
 import { layoutDiagram } from '../src/core/layout';
-import { generateDrawioXML } from '../src/core/drawio';
 import { formatParsed, formatMergedPlantUML } from '../src/core/plantuml';
 import { parseFilesWithCrossFileTypes, mergeParsedData } from '../src/core/merge';
 
@@ -59,9 +58,7 @@ describe('泛型类名', () => {
     expect(new Set(aliases).size).toBe(aliases.length);
   });
 
-  test('Draw.io 标题也带 <T>', () => {
-    const xml = generateDrawioXML(layoutDiagram(parseCode('class Repo<T> {}')));
-    // 框标签先做 HTML 转义（<T> -> &lt;T&gt;），写入 mxCell 属性时再整体转义一次
-    expect(xml).toContain('Repo&amp;lt;T&amp;gt;');
+  test('标题函数对普通类不受影响', () => {
+    expect(titleOf('class Plain {}', 'Plain')).toBe('Plain');
   });
 });

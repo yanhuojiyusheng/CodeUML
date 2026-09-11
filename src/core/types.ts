@@ -75,18 +75,3 @@ export interface Diagram {
   width: number;
   height: number;
 }
-
-export interface DrawioCell {
-  id: number;
-  value: string;
-  style: string;
-  vertex?: number;
-  edge?: number;
-  x?: number;
-  y?: number;
-  w?: number;
-  h?: number;
-  source?: number;
-  target?: number;
-  parent?: string;
-}

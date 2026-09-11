@@ -1,7 +1,7 @@
 /**
  * 装饰器 -> stereotype
  *
- * 类上的装饰器映射成 UML stereotype：SVG / Draw.io 显示为独立的一行 «X»，
+ * 类上的装饰器映射成 UML stereotype：SVG 显示为独立的一行 «X»，
  * PlantUML 输出 `class "Foo" as Foo <<X>>`。
  */
 

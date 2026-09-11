@@ -8,7 +8,6 @@
 import { parseFilesWithCrossFileTypes, mergeParsedData, ParseReport } from '../src/core/merge';
 import { layoutDiagram } from '../src/core/layout';
 import { formatMergedPlantUML } from '../src/core/plantuml';
-import { generateDrawioXML } from '../src/core/drawio';
 
 const emptyReport = (): ParseReport => ({ failures: [], duplicates: [], ambiguous: [] });
 
@@ -152,14 +151,6 @@ describe('渲染层：同名类都要画出来', () => {
     const boxes = diagram.boxes.filter(b => (b.displayName || b.name).startsWith('Config'));
     expect(boxes).toHaveLength(2);
     expect(boxes.map(b => b.displayName).sort()).toEqual(['Config (src/a.ts)', 'Config (src/b.ts)']);
-  });
-
-  test('Draw.io 导出两个节点', () => {
-    const { merged } = build(files);
-    const xml = generateDrawioXML(layoutDiagram(merged));
-    expect((xml.match(/vertex="1"/g) || [])).toHaveLength(2);
-    expect(xml).toContain('Config (src/a.ts)');
-    expect(xml).toContain('Config (src/b.ts)');
   });
 
   test('PlantUML：同名类都输出，别名唯一，标题保留原名', () => {

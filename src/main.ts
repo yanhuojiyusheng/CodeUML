@@ -3,7 +3,6 @@
 import { parseFilesWithCrossFileTypes, mergeParsedData, ParseReport } from './core/merge';
 import { layoutDiagram, setLayoutConfig } from './core/layout';
 import { renderSVG, setDisplayConfig } from './core/svg';
-import { generateDrawioXML } from './core/drawio';
 import { formatMergedPlantUML } from './core/plantuml';
 import { RELATION_MODES, filterRelationsByMode } from './core/relations';
 import { splitSourcePath } from './core/utils';
@@ -22,7 +21,6 @@ import { DEFAULT_FILES } from './ui/samples';
 // ---------------- DOM 元素 ----------------
 const codeEl = byId<HTMLTextAreaElement>('code');
 const diagramEl = byId<HTMLDivElement>('diagram-view');
-const xmlOutputEl = byId<HTMLTextAreaElement>('xml-output');
 const parsedOutputEl = byId<HTMLTextAreaElement>('parsed-output');
 const editorPane = byId<HTMLDivElement>('editor-pane');
 const fileTabsEl = byId<HTMLDivElement>('file-tabs');
@@ -51,9 +49,9 @@ const zoomResetBtn = byId<HTMLButtonElement>('zoom-reset');
 let relationMode = 0;
 
 // 视图懒生成：三份输出共用同一次解析/合并/布局，但只有当前选中的视图才序列化
-type ViewKey = 'diagram' | 'xml' | 'parsed';
+type ViewKey = 'diagram' | 'parsed';
 let activeView: ViewKey = 'diagram';
-const staleViews = new Set<ViewKey>(['diagram', 'xml', 'parsed']);
+const staleViews = new Set<ViewKey>(['diagram', 'parsed']);
 let lastBase: {
   diagram: ReturnType<typeof layoutDiagram>;
   displayDiagram: ReturnType<typeof layoutDiagram>;
@@ -172,13 +170,12 @@ function updateAll() {
 
     const diagram = layoutDiagram(merged);
 
-    // 图表显示按当前关系模式过滤，XML/PlantUML 保留全量
+    // 图表显示按当前关系模式过滤，PlantUML 保留全量
     const displayDiagram = { ...diagram, lines: filterRelationsByMode(diagram.lines, relationMode) };
     lastBase = { diagram, displayDiagram, allParsed, classPackageMap };
 
     // 基础数据变了，三份输出都过期；只重算当前视图（切页时会补算）
     staleViews.add('diagram');
-    staleViews.add('xml');
     staleViews.add('parsed');
     renderView(activeView);
   } catch (e: unknown) {
@@ -247,17 +244,15 @@ maxMethodsEl.addEventListener('change', () => {
 // ---------------- 导出（供 HTML onclick 调用） ----------------
 declare global {
   interface Window {
-    exportDrawio: () => void;
     exportSVG: () => void;
     exportPlantUML: () => void;
   }
 }
-window.exportDrawio = exportActions.exportDrawio;
 window.exportSVG = exportActions.exportSVG;
 window.exportPlantUML = exportActions.exportPlantUML;
 
 // ---------------- 视图懒生成 ----------------
-/** 只渲染指定视图；XML / PlantUML 只有在切到那一页时才序列化 */
+/** 只渲染指定视图；PlantUML 只有在切到那一页时才序列化 */
 function renderView(view: ViewKey) {
   const base = lastBase;
   if (!base) return;
@@ -266,8 +261,6 @@ function renderView(view: ViewKey) {
     diagramEl.innerHTML = renderSVG(base.displayDiagram, highlighter.relationKey);
     highlighter.sync(base.displayDiagram);
     zoom.apply();
-  } else if (view === 'xml') {
-    xmlOutputEl.value = generateDrawioXML(base.diagram);
   } else {
     parsedOutputEl.value = formatMergedPlantUML(base.allParsed, base.classPackageMap);
   }
@@ -288,7 +281,7 @@ document.querySelectorAll('.tab').forEach(tab => {
 
     const view = tab.getAttribute('data-view') as ViewKey | null;
     const viewId = `${view}-view`;
-    document.querySelectorAll('#diagram-view, #xml-view, #parsed-view').forEach(v => v.classList.remove('active'));
+    document.querySelectorAll('#diagram-view, #parsed-view').forEach(v => v.classList.remove('active'));
     document.getElementById(viewId)?.classList.add('active');
     if (view) showView(view);
   });

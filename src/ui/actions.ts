@@ -1,13 +1,11 @@
-/** 导出动作：Draw.io / SVG / PlantUML */
+/** 导出动作：SVG / PlantUML */
 
 import { ParsedData } from '../core/types';
 import { mergeParsedData } from '../core/merge';
 import { layoutDiagram } from '../core/layout';
-import { generateDrawioXML } from '../core/drawio';
 import { formatMergedPlantUML } from '../core/plantuml';
 
 export interface ExportActions {
-  exportDrawio(): void;
   exportSVG(): void;
   exportPlantUML(): void;
 }
@@ -29,13 +27,6 @@ export function createExportActions(opts: {
 }): ExportActions {
   const { renderDiagramSVG, mergeAllParsed } = opts;
 
-  function exportDrawio() {
-    const allParsed = mergeAllParsed();
-    const { merged } = mergeParsedData(allParsed);
-    const diagram = layoutDiagram(merged);
-    downloadFile('class-diagram.drawio', generateDrawioXML(diagram), 'application/xml');
-  }
-
   function exportSVG() {
     downloadFile('class-diagram.svg', `<?xml version="1.0" encoding="UTF-8"?>\n${renderDiagramSVG()}`, 'image/svg+xml');
   }
@@ -46,5 +37,5 @@ export function createExportActions(opts: {
     downloadFile('diagram.puml', formatMergedPlantUML(allParsed, classPackageMap), 'text/plain');
   }
 
-  return { exportDrawio, exportSVG, exportPlantUML };
+  return { exportSVG, exportPlantUML };
 }

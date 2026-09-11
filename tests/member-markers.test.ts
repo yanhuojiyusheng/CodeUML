@@ -1,7 +1,7 @@
 /**
  * 成员标记：{static} / {abstract} / {readonly}
  *
- * 这三个标记同时影响 SVG、Draw.io 与 PlantUML 三处渲染，
+ * 这三个标记同时影响 SVG 与 PlantUML 两处渲染，
  * 所以统一以 utils.memberText 为准做断言。
  */
 

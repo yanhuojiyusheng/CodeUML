@@ -5,16 +5,14 @@
 import { parseCode } from '../src/core/parser';
 import { layoutDiagram } from '../src/core/layout';
 import { renderSVG } from '../src/core/svg';
-import { generateDrawioXML } from '../src/core/drawio';
 import { ParsedData, Diagram } from '../src/core/types';
 
 // 完整的处理流程
-function processCode(code: string): { parsed: ParsedData; diagram: Diagram; svg: string; xml: string } {
+function processCode(code: string): { parsed: ParsedData; diagram: Diagram; svg: string } {
   const parsed = parseCode(code);
   const diagram = layoutDiagram(parsed);
   const svg = renderSVG(diagram);
-  const xml = generateDrawioXML(diagram);
-  return { parsed, diagram, svg, xml };
+  return { parsed, diagram, svg };
 }
 
 describe('集成测试 - 完整流程', () => {
@@ -29,12 +27,11 @@ describe('集成测试 - 完整流程', () => {
       
       expect(() => processCode(code)).not.toThrow();
       
-      const { parsed, diagram, svg, xml } = processCode(code);
+      const { parsed, diagram, svg } = processCode(code);
       
       expect(parsed.classes).toHaveLength(1);
       expect(diagram.boxes).toHaveLength(1);
       expect(svg).toContain('<svg');
-      expect(xml).toContain('<mxfile>');
     });
 
     test('空代码应该通过完整流程', () => {
@@ -165,80 +162,7 @@ describe('集成测试 - 完整流程', () => {
   });
 
   // --------------------------------------------------------
-  // 4. Draw.io XML 导出
-  // --------------------------------------------------------
-  describe('4. Draw.io XML 导出', () => {
-    
-    test('应该生成有效的 XML 结构', () => {
-      const code = `class Person {}`;
-      const { xml } = processCode(code);
-      
-      expect(xml).toContain('<?xml version="1.0"');
-      expect(xml).toContain('<mxfile>');
-      expect(xml).toContain('</mxfile>');
-      expect(xml).toContain('<mxGraphModel>');
-    });
-
-    test('类应该导出为 swimlane 单元格', () => {
-      const code = `class Person {}`;
-      const { xml } = processCode(code);
-      
-      expect(xml).toContain('swimlane');
-      expect(xml).toContain('Person');
-    });
-
-    test('继承关系应该导出为边', () => {
-      const code = `
-        class Parent {}
-        class Child extends Parent {}
-      `;
-      const { xml } = processCode(code);
-      
-      expect(xml).toContain('edge="1"');
-      expect(xml).toContain('endArrow=block');
-      expect(xml).toContain('endFill=0');
-    });
-
-    test('实现关系应该导出为虚线边', () => {
-      const code = `
-        interface I { m(): void; }
-        class C implements I { m(): void {} }
-      `;
-      const { xml } = processCode(code);
-      
-      expect(xml).toContain('dashed=1');
-    });
-
-    test('多重性应该在 XML 中显示', () => {
-      const code = `
-        class Item {}
-        class Container { items: Item[]; }
-      `;
-      const { xml } = processCode(code);
-      
-      expect(xml).toContain('*');
-    });
-
-    test('导出的 XML 属性值必须转义（否则不是良构 XML）', () => {
-      const { xml } = processCode(`class Foo { x: string; m(): void {} }`);
-      // value 属性内部不允许出现裸 '<'
-      expect(xml).not.toMatch(/value="[^"]*</);
-      expect(xml).toContain('&lt;p&gt;');
-    });
-
-    test('mxCell id 必须唯一且不与根节点冲突', () => {
-      const { xml } = processCode(`class A {} class B {} class C extends A {}`);
-      const ids = [...xml.matchAll(/<mxCell id="(\d+)"/g)].map(m => m[1]);
-      expect(new Set(ids).size).toBe(ids.length);          // 无重复
-      expect(ids).toContain('0');
-      expect(ids).toContain('1');
-      const businessIds = ids.map(Number).filter(n => n > 1);
-      expect(Math.min(...businessIds)).toBe(2);             // 业务节点从 2 开始
-    });
-  });
-
-  // --------------------------------------------------------
-  // 5. 错误处理
+  // 4. 错误处理
   // --------------------------------------------------------
   describe('5. 错误处理', () => {
     
@@ -297,12 +221,11 @@ describe('集成测试 - 完整流程', () => {
       
       expect(() => processCode(code)).not.toThrow();
       
-      const { parsed, diagram, svg, xml } = processCode(code);
+      const { parsed, diagram, svg } = processCode(code);
       
       expect(parsed.classes.length).toBeGreaterThanOrEqual(5);
       expect(diagram.boxes.length).toBeGreaterThanOrEqual(5);
       expect(svg).toContain('<svg');
-      expect(xml).toContain('<mxfile>');
     });
   });
 
