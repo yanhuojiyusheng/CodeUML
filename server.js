@@ -3,6 +3,8 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
+const { pipeline } = require('stream');
 const { spawn } = require('child_process');
 
 const ROOT = __dirname;
@@ -21,6 +23,10 @@ const MIME = {
   '.ico': 'image/x-icon',
   '.map': 'application/json; charset=utf-8',
 };
+
+// 只压缩文本类资源；图片等已经是压缩格式，再 gzip 没意义
+const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.json', '.svg', '.map']);
+const MIN_GZIP_BYTES = 1024;
 
 /** URL 路径 -> ROOT 内的绝对文件路径；越界返回 null（防目录穿越） */
 function resolvePath(urlPath) {
@@ -44,11 +50,29 @@ function createServer() {
         res.writeHead(404);
         return res.end('Not Found');
       }
+      const ext = path.extname(file).toLowerCase();
+      const type = MIME[ext] || 'application/octet-stream';
+      const useGzip = stat.size >= MIN_GZIP_BYTES &&
+        COMPRESSIBLE.has(ext) &&
+        /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+
+      if (useGzip) {
+        // 压缩后长度未知，改用 chunked 传输，不再发 Content-Length
+        res.writeHead(200, {
+          'Content-Type': type,
+          'Content-Encoding': 'gzip',
+          'Vary': 'Accept-Encoding',
+        });
+        // pipeline 负责在客户端中断时销毁流，避免未处理的 error 打挂进程
+        pipeline(fs.createReadStream(file), zlib.createGzip(), res, () => {});
+        return;
+      }
       res.writeHead(200, {
-        'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
+        'Content-Type': type,
         'Content-Length': stat.size,
+        'Vary': 'Accept-Encoding',
       });
-      fs.createReadStream(file).pipe(res);
+      pipeline(fs.createReadStream(file), res, () => {});
     });
   });
 }
@@ -75,8 +99,8 @@ function start() {
   });
 }
 
-/** 自检：路径解析 + 首页可访问（node server.js --check） */
-function runCheck() {
+/** 自检：路径解析 + 首页可访问 + gzip 协商（node server.js --check） */
+async function runCheck() {
   const assert = require('assert');
   assert.strictEqual(resolvePath('/'), path.join(ROOT, 'index.html'));
   assert.strictEqual(resolvePath('/styles/app.css'), path.join(ROOT, 'styles', 'app.css'));
@@ -84,17 +108,26 @@ function runCheck() {
   assert.strictEqual(resolvePath('/%2e%2e/server.js'), null);
 
   const server = createServer();
-  server.listen(0, () => {
-    const port = server.address().port;
-    http.get(`http://localhost:${port}/`, (res) => {
-      assert.strictEqual(res.statusCode, 200);
+  await new Promise(resolve => server.listen(0, resolve));
+  const port = server.address().port;
+
+  const get = headers => new Promise(resolve => {
+    http.get({ host: 'localhost', port, path: '/', headers }, res => {
       res.resume();
-      res.on('end', () => {
-        server.close();
-        console.log('self-check ok');
-      });
+      res.on('end', () => resolve(res));
     });
   });
+
+  const plain = await get({});
+  assert.strictEqual(plain.statusCode, 200);
+  assert.strictEqual(plain.headers['content-encoding'], undefined);
+
+  const gzipped = await get({ 'Accept-Encoding': 'gzip' });
+  assert.strictEqual(gzipped.statusCode, 200);
+  assert.strictEqual(gzipped.headers['content-encoding'], 'gzip');
+
+  server.close();
+  console.log('self-check ok');
 }
 
 if (require.main === module) {
