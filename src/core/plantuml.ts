@@ -8,6 +8,11 @@ function safeQuoted(name: string): string {
   return String(name).replace(/"/g, "'");
 }
 
+/** PlantUML 的 stereotype 后缀：` <<A, B>>`（无装饰器时为空） */
+function stereotypeSuffix(c: { decorators?: string[] }): string {
+  return c.decorators && c.decorators.length > 0 ? ` <<${c.decorators.join(', ')}>>` : '';
+}
+
 /** 格式化成员 */
 export function formatMember(m: Member): string {
   const staticStr = m.isStatic ? '{static} ' : '';
@@ -64,13 +69,13 @@ export function formatParsed(parsed: ParsedData, packageName?: string): string {
   parsed.classes.forEach(c => {
     const indent = packageName ? '  ' : '';
     if (c.isEnum) {
-      text += `${indent}enum "${safeQuoted(classTitle(c))}" as ${c.name} {\n`;
+      text += `${indent}enum "${safeQuoted(classTitle(c))}" as ${c.name}${stereotypeSuffix(c)} {\n`;
     } else if (c.isInterface) {
-      text += `${indent}interface "${safeQuoted(classTitle(c))}" as ${c.name} {\n`;
+      text += `${indent}interface "${safeQuoted(classTitle(c))}" as ${c.name}${stereotypeSuffix(c)} {\n`;
     } else if (c.isAbstract) {
-      text += `${indent}abstract class "${safeQuoted(classTitle(c))}" as ${c.name} {\n`;
+      text += `${indent}abstract class "${safeQuoted(classTitle(c))}" as ${c.name}${stereotypeSuffix(c)} {\n`;
     } else {
-      text += `${indent}class "${safeQuoted(classTitle(c))}" as ${c.name} {\n`;
+      text += `${indent}class "${safeQuoted(classTitle(c))}" as ${c.name}${stereotypeSuffix(c)} {\n`;
     }
 
     const props = c.members.filter(m => m.kind === 'property');
@@ -141,13 +146,13 @@ export function formatMergedPlantUML(allParsed: Map<string, ParsedData>, classPa
       const title = classTitle(c);
 
       if (c.isEnum) {
-        text += `  enum "${safeQuoted(title)}" as ${alias} {\n`;
+        text += `  enum "${safeQuoted(title)}" as ${alias}${stereotypeSuffix(c)} {\n`;
       } else if (c.isInterface) {
-        text += `  interface "${safeQuoted(title)}" as ${alias} {\n`;
+        text += `  interface "${safeQuoted(title)}" as ${alias}${stereotypeSuffix(c)} {\n`;
       } else if (c.isAbstract) {
-        text += `  abstract class "${safeQuoted(title)}" as ${alias} {\n`;
+        text += `  abstract class "${safeQuoted(title)}" as ${alias}${stereotypeSuffix(c)} {\n`;
       } else {
-        text += `  class "${safeQuoted(title)}" as ${alias} {\n`;
+        text += `  class "${safeQuoted(title)}" as ${alias}${stereotypeSuffix(c)} {\n`;
       }
 
       const props = c.members.filter(m => m.kind === 'property');

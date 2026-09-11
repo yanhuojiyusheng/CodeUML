@@ -101,21 +101,27 @@ export function layoutDiagram(parsed: ParsedData): Diagram {
     const displayProps = visibleProps.length;
     const displayMeths = visibleMeths.length;
     
-    const stereotypeH = c.isInterface || c.isAbstract ? 16 : 0;
+    const title = classTitle(c);
+    // stereotype 行：接口/抽象类 + 类上的装饰器（数量不限，高度要按行数算）
+    const stereotypes = [
+      ...(c.isInterface ? ['«interface»'] : []),
+      ...(c.isAbstract && !c.isInterface ? ['«abstract»'] : []),
+      ...(c.decorators || []).map(d => `«${d}»`),
+    ];
+    const stereotypeH = stereotypes.length * 16;
     const titleH = 26;
     const propsH = Math.max(displayProps + (hasMoreProps ? 1 : 0), 1) * LAYOUT.LINE_H;
     const methsH = Math.max(displayMeths + (hasMoreMeths ? 1 : 0), 1) * LAYOUT.LINE_H;
     const h = stereotypeH + titleH + 1 + propsH + 1 + methsH + 8;
 
-    const title = classTitle(c);
     const lines = [
-      ...(c.isInterface ? [{ text: '«interface»', cls: 'stereotype' }] : []),
-      ...(c.isAbstract && !c.isInterface ? [{ text: '«abstract»', cls: 'stereotype' }] : []),
+      ...stereotypes.map(t => ({ text: t, cls: 'stereotype' })),
       { text: title, cls: 'title' }
     ];
 
     // 计算最大宽度
     let maxW = textWidth(title);
+    stereotypes.forEach(s => { maxW = Math.max(maxW, textWidth(s)); });
     props.slice(0, displayProps).forEach(p => { maxW = Math.max(maxW, textWidth(memberText(p))); });
     meths.slice(0, displayMeths).forEach(m => { maxW = Math.max(maxW, textWidth(memberText(m))); });
     if (hasMoreProps || hasMoreMeths) {

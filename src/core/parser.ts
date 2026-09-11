@@ -56,6 +56,23 @@ function getReturnType(sig: any, sf: any): string {
   return sig.type.getText(sf);
 }
 
+/**
+ * 声明上的装饰器名（只取最后一段，忽略调用参数）。
+ *   @Component -> Component；@Injectable({...}) -> Injectable；@core.Log() -> Log
+ */
+function decoratorsOf(node: any, sf: any): string[] {
+  const out: string[] = [];
+  for (const mod of node.modifiers || []) {
+    if (!ts.isDecorator(mod)) continue;
+    let expr = mod.expression;
+    if (ts.isCallExpression(expr)) expr = expr.expression;
+    const text = expr.getText(sf);
+    const name = text.split('.').pop();
+    if (name) out.push(name);
+  }
+  return out;
+}
+
 // 清理类型文本，提取用户类型名列表
 // aliases：类型别名展开表（如 UserRef -> User）；depth 仅用于别名链的循环保护
 function cleanTypeName(typeText: string, aliases?: ReadonlyMap<string, string>, depth = 0): string {
@@ -471,6 +488,7 @@ export function parseCodeWithKnownTypes(
       classes.push({
         name: node.name.text,
         typeParams: (node.typeParameters || []).map((tp: any) => tp.name.getText(sf)),
+        decorators: decoratorsOf(node, sf),
         isInterface: true,
         isAbstract: false,
         isEnum: false,
@@ -585,6 +603,7 @@ export function parseCodeWithKnownTypes(
       classes.push({
         name: node.name.text,
         typeParams: (node.typeParameters || []).map((tp: any) => tp.name.getText(sf)),
+        decorators: decoratorsOf(node, sf),
         isInterface: false,
         isAbstract,
         isEnum: false,

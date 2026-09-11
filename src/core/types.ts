@@ -17,6 +17,8 @@ export interface ClassInfo {
   displayName?: string;
   /** 类/接口声明的类型参数名（如 ['T'] 或 ['K', 'V']），仅用于标题显示 */
   typeParams?: string[];
+  /** 类上的装饰器名（如 ['Component']），映射成 stereotype */
+  decorators?: string[];
   isInterface: boolean;
   isAbstract: boolean;
   isEnum: boolean;

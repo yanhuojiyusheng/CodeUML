@@ -50,7 +50,7 @@ export function validatePlantUML(text: string): string[] {
     if (pkgMatch) { stack.push('package'); continue; }
 
     const clsMatch = line.match(new RegExp(
-      `^(abstract\\s+)?(class|interface|enum)\\s+"([^"]*)"\\s+as\\s+(${IDENT})\\s*\\{$`));
+      `^(abstract\\s+)?(class|interface|enum)\\s+"([^"]*)"\\s+as\\s+(${IDENT})(\\s+<<[^>]*>>)*\\s*\\{$`));
     if (clsMatch) { stack.push('class'); continue; }
 
     if (stack[stack.length - 1] === 'class') {
