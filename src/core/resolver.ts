@@ -14,7 +14,7 @@
  * 任何异常都退化为空映射。
  */
 
-import { SourceFile } from './merge';
+import { SourceFile, ConfigFile } from './merge';
 
 // 兼容浏览器和 Node.js 环境
 declare const ts: any;
@@ -49,6 +49,67 @@ function virtualPathsFor(pkg: string): string[] {
   return [primary, `${primary}.ts`, `${primary}.tsx`, `${primary}.js`, `${primary}.jsx`];
 }
 
+/** package.json 里声明的入口（按优先级） */
+function packageEntryCandidates(json: any): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v === 'string' && v) out.push(v.replace(/^\.?\//, ''));
+  };
+  push(json?.types);
+  push(json?.typings);
+
+  const exp = json?.exports;
+  if (typeof exp === 'string') {
+    push(exp);
+  } else if (exp && typeof exp === 'object') {
+    // exports 可能直接是条件对象，也可能挂在 '.' 下
+    const dot = (exp as any)['.'] ?? exp;
+    if (typeof dot === 'string') push(dot);
+    else if (dot && typeof dot === 'object') {
+      push(dot.types);
+      push(dot.import);
+      push(dot.require);
+      push(dot.default);
+    }
+  }
+
+  push(json?.module);
+  if (typeof json?.main === 'string') push(json.main.replace(/\.([cm])?js$/, '.ts'));
+  return out;
+}
+
+/**
+ * 从拖入的 package.json 建出 TS 的 `paths`：workspace 包名 -> 包入口。
+ * 地址是权威的（包名唯一），因此不像 tsconfig 那样会互相冲突。
+ * 入口按优先级列出多个候选，TS 会依次尝试，取第一个真实存在的。
+ */
+function buildPackagePaths(configs: ConfigFile[]): Record<string, string[]> {
+  const paths: Record<string, string[]> = {};
+  for (const cfg of configs) {
+    if (!/(^|\/)package\.json$/i.test(cfg.name)) continue;
+    let json: any;
+    try {
+      json = JSON.parse(cfg.content);
+    } catch {
+      continue; // 非合法 JSON，忽略
+    }
+    const name = json?.name;
+    if (typeof name !== 'string' || !name) continue;
+
+    const dir = cfg.name.replace(/\/[^/]*$/, '');
+    const prefix = dir ? `${dir}/` : '';
+    const candidates = [
+      ...packageEntryCandidates(json),
+      // package.json 常指向构建产物（dist/）而那里不在文件集里，所以再补源码入口兜底
+      'src/index.ts', 'src/index.tsx', 'index.ts', 'index.tsx',
+    ];
+    paths[name] = [...new Set(candidates.map(e => toVirtualPath(`${prefix}${e}`)))];
+    // 子路径 import（@scope/pkg/xxx）
+    paths[`${name}/*`] = [toVirtualPath(`${prefix}*`)];
+  }
+  return paths;
+}
+
 /** 符号的声明名：default 导出要取声明本身的名字（`export default class Foo` -> Foo） */
 function declaredNameOf(sym: any, decl: any): string {
   const nameNode = decl && decl.name;
@@ -65,7 +126,7 @@ function scriptKindFor(fileName: string) {
 }
 
 /** 用内存文件构建 Program，得到「文件 -> 类型名 -> 所在包」的映射；失败则返回空映射 */
-export function resolveTypes(files: SourceFile[]): TypeResolution {
+export function resolveTypes(files: SourceFile[], configs: ConfigFile[] = []): TypeResolution {
   try {
     const pathToPackage = new Map<string, string>();
     const contents = new Map<string, string>();
@@ -83,6 +144,8 @@ export function resolveTypes(files: SourceFile[]): TypeResolution {
     if (contents.size === 0) return EMPTY;
 
     // 只需要解析用户自己的类型，不需要 lib（noLib），也不必做类型检查
+    // paths：把 workspace 包名（@scope/pkg）映射到实际文件，否则裸包名无法解析
+    const packagePaths = buildPackagePaths(configs);
     const options = {
       target: ts.ScriptTarget.ES2020,
       module: ts.ModuleKind.ESNext,
@@ -92,6 +155,7 @@ export function resolveTypes(files: SourceFile[]): TypeResolution {
       skipLibCheck: true,
       allowJs: true,
       checkJs: false,
+      ...(Object.keys(packagePaths).length > 0 ? { baseUrl: '/', paths: packagePaths } : {}),
     };
 
     const host = {

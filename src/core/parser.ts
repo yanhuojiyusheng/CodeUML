@@ -211,6 +211,70 @@ function isOptionalType(typeText: string): boolean {
   return typeText.includes('null') || typeText.includes('undefined');
 }
 
+interface PropertyEntry {
+  fieldName: string;
+  typeText: string;
+  isOptional: boolean;
+  isNew: boolean;
+}
+
+/**
+ * 把属性（含构造参数属性）归类成 组合 / 聚合 / 关联 关系。
+ * **类与接口共用**，避免两边规则不一致（历史上接口一律 association[1]）。
+ * 同一目标：关系取最强（组合 > 聚合 > 关联），多重性取最大（* > 0..1 > 1），字段名合并成标签。
+ */
+function propertyEntriesToRelations(
+  ownerName: string,
+  entries: PropertyEntry[],
+  knownTypes: Set<string>,
+  excluded: Set<string>,
+  aliases: ReadonlyMap<string, string>,
+): { relations: Relation[]; types: Set<string> } {
+  const types = new Set<string>();
+  const map = new Map<string, {
+    type: 'association' | 'aggregation' | 'composition';
+    fields: string[];
+    multiplicity: string;
+  }>();
+
+  for (const entry of entries) {
+    const effectiveType = expandAlias(entry.typeText, aliases);
+    const isCollection = isCollectionType(effectiveType);
+    const isOptional = entry.isOptional || isOptionalType(effectiveType);
+
+    for (const typeName of extractUserTypes(entry.typeText, knownTypes, excluded, aliases)) {
+      types.add(typeName);
+      if (typeName === ownerName) continue;
+
+      const relType = entry.isNew ? 'composition' : isCollection ? 'aggregation' : 'association';
+      const multiplicity = entry.isNew ? '1' : isCollection ? '*' : isOptional ? '0..1' : '1';
+
+      const existing = map.get(typeName);
+      if (existing) {
+        existing.fields.push(entry.fieldName);
+        if (relType === 'composition') existing.type = 'composition';
+        else if (relType === 'aggregation' && existing.type === 'association') existing.type = 'aggregation';
+        if (multiplicity === '*') existing.multiplicity = '*';
+        else if (multiplicity === '0..1' && existing.multiplicity === '1') existing.multiplicity = '0..1';
+      } else {
+        map.set(typeName, { type: relType, fields: [entry.fieldName], multiplicity });
+      }
+    }
+  }
+
+  const relations: Relation[] = [];
+  map.forEach((info, typeName) => {
+    relations.push({
+      from: ownerName,
+      to: typeName,
+      type: info.type,
+      toMultiplicity: info.multiplicity,
+      label: info.fields.join(', '),
+    });
+  });
+  return { relations, types };
+}
+
 // 基本类型列表（扩充）
 const BASIC_TYPES = new Set([
   'string', 'number', 'boolean', 'any', 'void', 'never', 'unknown', 'object',
@@ -321,16 +385,28 @@ export function collectTypeInfo(code: string, fileName?: string): TypeInfo {
   return collectFromSourceFile(createSourceFile(code, fileName));
 }
 
+/**
+ * 从类型文本里提取类型名（单层，**不做别名展开**）。
+ * 供跨文件解析使用：别名在它定义的那个文件的作用域里展开时，需要先拿到右值里的名字。
+ */
+export function extractTypeNames(typeText: string): string[] {
+  const cleaned = cleanTypeName(typeText);
+  if (!cleaned) return [];
+  return [...new Set(cleaned.split(',').map(s => s.trim()).filter(Boolean))];
+}
+
 export function parseCode(code: string, fileName?: string): ParsedData {
   return parseCodeWithKnownTypes(code, new Set(), fileName);
 }
 
-/** 带预设类型的解析（用于跨文件） */
+/**
+ * 带预设类型的解析（用于跨文件）。
+ * 类型别名只展开**本文件内声明的**；跨文件的别名由 merge 在别名定义处的作用域里展开。
+ */
 export function parseCodeWithKnownTypes(
   code: string,
   externalTypes: Set<string>,
   fileName?: string,
-  externalAliases?: ReadonlyMap<string, string>,
 ): ParsedData {
   const sf = createSourceFile(code, fileName);
   const classes: ClassInfo[] = [];
@@ -338,9 +414,7 @@ export function parseCodeWithKnownTypes(
   const local = collectFromSourceFile(sf);
   const knownTypes = new Set<string>(externalTypes); // 包含外部类型
   local.types.forEach(t => knownTypes.add(t));
-  // 别名表：外部（其它文件）打底，本文件覆盖
-  const aliases = new Map<string, string>(externalAliases || []);
-  local.aliases.forEach((target, name) => aliases.set(name, target));
+  const aliases = new Map<string, string>(local.aliases);
   const statements = flattenStatements(sf);
 
   // 第二遍：解析所有类/接口/枚举（不处理关系）
@@ -529,30 +603,23 @@ export function parseCodeWithKnownTypes(
         });
       }
 
-      // 接口属性关联（排除接口泛型参数，支持联合类型）
+      // 接口属性：与类共用同一套组合/聚合/关联分类（排除接口泛型参数，支持联合类型）
       const typeParams = new Set<string>(node.typeParameters?.map((tp: any) => tp.name.text) || []);
-      const associationMap = new Map<string, string[]>();
+      const propertyEntries: PropertyEntry[] = [];
       node.members.forEach((m: any) => {
         if (ts.isPropertySignature(m)) {
-          const typeText = m.type?.getText(sf) || '';
-          for (const typeName of extractUserTypes(typeText, knownTypes, typeParams, aliases)) {
-            if (typeName === node.name.text) continue;
-            const fields = associationMap.get(typeName) || [];
-            fields.push(m.name.getText(sf));
-            associationMap.set(typeName, fields);
-          }
+          propertyEntries.push({
+            fieldName: m.name.getText(sf),
+            typeText: m.type?.getText(sf) || '',
+            isOptional: !!m.questionToken,
+            isNew: false,
+          });
         }
       });
-      
-      associationMap.forEach((fields, typeName) => {
-        relations.push({
-          from: node.name.text,
-          to: typeName,
-          type: 'association',
-          toMultiplicity: '1',
-          label: fields.length > 1 ? fields.join(', ') : undefined
-        });
-      });
+      const { relations: propertyRelations } = propertyEntriesToRelations(
+        node.name.text, propertyEntries, knownTypes, typeParams, aliases,
+      );
+      relations.push(...propertyRelations);
 
       // 继承泛型的类型实参 -> 依赖
       if (node.heritageClauses) {
@@ -604,10 +671,9 @@ export function parseCodeWithKnownTypes(
       }
 
       // 收集属性类型和构造函数参数
-      const propertyTypes = new Set<string>();
       const constructorParamNames = new Set<string>(); // 带修饰符的参数（属性）
       // 属性条目：统一生成组合/聚合/关联关系（含字段和构造函数参数属性）
-      const propertyEntries: { fieldName: string; typeText: string; isOptional: boolean; isNew: boolean }[] = [];
+      const propertyEntries: PropertyEntry[] = [];
       
       node.members.forEach((m: any) => {
         if (ts.isPropertyDeclaration(m)) {
@@ -626,8 +692,6 @@ export function parseCodeWithKnownTypes(
             }
           }
           
-          const types = extractUserTypes(typeText, knownTypes, classTypeParams, aliases);
-          types.forEach(t => propertyTypes.add(t));
           propertyEntries.push({
             fieldName: m.name.getText(sf),
             typeText,
@@ -649,8 +713,6 @@ export function parseCodeWithKnownTypes(
             if (hasModifier) {
               // 有修饰符 -> 参数属性，视为字段（关联），不是依赖
               constructorParamNames.add(p.name.getText(sf));
-              const types = extractUserTypes(pType, knownTypes, classTypeParams, aliases);
-              types.forEach(t => propertyTypes.add(t));
               propertyEntries.push({
                 fieldName: p.name.getText(sf),
                 typeText: pType,
@@ -662,62 +724,11 @@ export function parseCodeWithKnownTypes(
         }
       });
 
-      // 组合/聚合关系（属性类型，含构造函数参数属性）
-      const relationMap = new Map<string, { type: 'association' | 'aggregation' | 'composition', fields: string[], multiplicity: string }>();
-      
-      for (const entry of propertyEntries) {
-        const typeNames = extractUserTypes(entry.typeText, knownTypes, classTypeParams, aliases);
-        for (const typeName of typeNames) {
-          if (typeName === node.name.text) continue;
-          
-          const fieldName = entry.fieldName;
-          const effectiveType = expandAlias(entry.typeText, aliases);
-          const isArray = isCollectionType(effectiveType);
-          const isOptional = entry.isOptional || isOptionalType(effectiveType);
-          const isNew = entry.isNew;
-          
-          let relType: 'association' | 'aggregation' | 'composition';
-          let multiplicity: string;
-          
-          if (isNew) {
-            // new 创建 -> 组合
-            relType = 'composition';
-            multiplicity = '1';
-          } else if (isArray) {
-            // 数组/集合类型 -> 聚合
-            relType = 'aggregation';
-            multiplicity = '*';
-          } else {
-            // 普通类型引用 -> 关联
-            relType = 'association';
-            multiplicity = isOptional ? '0..1' : '1';
-          }
-          
-          const existing = relationMap.get(typeName);
-          if (existing) {
-            existing.fields.push(fieldName);
-            // 关系类型优先级：组合 > 聚合 > 关联
-            if (relType === 'composition') existing.type = 'composition';
-            else if (relType === 'aggregation' && existing.type === 'association') existing.type = 'aggregation';
-            // 多重性优先级：* > 0..1 > 1
-            if (multiplicity === '*') existing.multiplicity = '*';
-            else if (multiplicity === '0..1' && existing.multiplicity === '1') existing.multiplicity = '0..1';
-          } else {
-            relationMap.set(typeName, { type: relType, fields: [fieldName], multiplicity });
-          }
-        }
-      }
-      
-      // BUG-3 修复：生成关系（带标签）
-      relationMap.forEach((info, typeName) => {
-        relations.push({
-          from: node.name.text,
-          to: typeName,
-          type: info.type,
-          toMultiplicity: info.multiplicity,
-          label: info.fields.join(', ') // 始终生成标签
-        });
-      });
+      // 组合/聚合/关联：类与接口共用同一套分类规则（含构造函数参数属性）
+      const { relations: propertyRelations, types: propertyTypes } = propertyEntriesToRelations(
+        node.name.text, propertyEntries, knownTypes, classTypeParams, aliases,
+      );
+      relations.push(...propertyRelations);
 
       // 依赖关系（仅函数参数中的类型）
       const dependencyTypes = new Set<string>();

@@ -62,12 +62,13 @@ const zoom = createZoom({
 createPan(diagramEl);
 
 // ---------------- 解析调度 ----------------
-/** 合并所有文件的解析结果（跨文件类型感知）；report 用于收集解析失败的文件 */
+/** 合并所有文件的解析结果（跨文件类型感知）；report 收集解析失败，configFiles 用于 workspace 包名解析 */
 function mergeAllParsed(report?: ParseReport): Map<string, ParsedData> {
   tabsController.syncActiveContent();
   return parseFilesWithCrossFileTypes(
     tabsController.visibleTabs().map(tab => ({ name: packageName(tab), content: tab.content })),
     report,
+    configFiles,
   );
 }
 
@@ -269,12 +270,15 @@ editorPane.addEventListener('drop', async (e) => {
   } else {
     // 回退：普通文件列表（无 entry API 的浏览器）
     for (const file of Array.from(dt.files)) {
-      if (!/\.tsx?$/.test(file.name)) {
-        console.warn(`跳过非 TypeScript 文件: ${file.name}`);
+      if (/\.tsx?$/.test(file.name)) {
+        // 保留扩展名：语义解析与 .tsx 的 ScriptKind 都依赖它
+        buffer.push({ name: file.name, content: await file.text(), folder: '' });
+      } else if (CONFIG_FILE_RE.test(file.name)) {
+        configFiles.push({ name: file.name, content: await file.text() });
+      } else {
+        console.warn(`跳过不支持的文件: ${file.name}`);
         continue;
       }
-      // 保留扩展名：语义解析与 .tsx 的 ScriptKind 都依赖它
-      buffer.push({ name: file.name, content: await file.text(), folder: '' });
       if (buffer.length >= CHUNK) flush();
     }
   }
@@ -286,12 +290,20 @@ editorPane.addEventListener('drop', async (e) => {
 /** 拖入时忽略的目录 */
 const SKIP_DIRS = new Set(['dist', 'node_modules']);
 
+/** 仅用于模块解析的配置文件（package.json），不作为图表内容 */
+const CONFIG_FILE_RE = /(^|\/)package\.json$/i;
+let configFiles: { name: string; content: string }[] = [];
+
 /** 递归收集拖入文件夹中的 .ts/.tsx（每读到一个就回调，边读边加；跳过 dist / node_modules） */
 async function collectTsFiles(entry: FileSystemEntry, onFile: (path: string, content: string) => void): Promise<void> {
   if (entry.isFile) {
     const file = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject));
+    const path = entry.fullPath.replace(/^\//, '');
     if (/\.tsx?$/.test(file.name)) {
-      onFile(entry.fullPath.replace(/^\//, ''), await file.text());
+      onFile(path, await file.text());
+    } else if (CONFIG_FILE_RE.test(path)) {
+      // workspace 包名要靠它才能解析，但不能当成源码放进图表
+      configFiles.push({ name: path, content: await file.text() });
     }
     return;
   }

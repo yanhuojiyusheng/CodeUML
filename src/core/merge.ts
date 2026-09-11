@@ -1,11 +1,17 @@
 /** 多文件合并解析（跨文件类型感知 + 语义解析） */
 
-import { collectTypeInfo, parseCodeWithKnownTypes } from './parser';
+import { collectTypeInfo, extractTypeNames, parseCodeWithKnownTypes } from './parser';
 import { resolveTypes } from './resolver';
 import { ParsedData, ClassInfo, Relation } from './types';
 
 export interface SourceFile {
   name: string;   // 包名（通常为文件名去扩展名）
+  content: string;
+}
+
+/** 仅用于模块解析的配置文件（如 package.json）：不进入图表，只用来解析 workspace 包名 */
+export interface ConfigFile {
+  name: string;
   content: string;
 }
 
@@ -27,27 +33,25 @@ function identityOf(pkg: string, name: string, duplicated: ReadonlySet<string>):
   return duplicated.has(name) ? `${pkg}#${name}` : name;
 }
 
-/**
- * 解析引用目标。优先级：
- *   1) 语义解析（import / 同文件 / 全局唯一）—— 最准确，且能处理重命名导入
- *   2) 本包内同名声明
- *   3) 全局唯一
- *   4) 仍歧义 -> 返回全部候选（由调用方叠加关系并上报）
- */
-function resolveTargets(
-  pkg: string,
-  name: string,
-  namesInPackage: ReadonlyMap<string, ReadonlySet<string>>,
-  packagesByName: ReadonlyMap<string, string[]>,
-  semantic: ReadonlyMap<string, { pkg: string; name: string }> | undefined,
-): { pkg: string; name: string }[] {
-  const sem = semantic?.get(name);
-  if (sem && sem.pkg && namesInPackage.get(sem.pkg)?.has(sem.name)) return [sem];
-  if (namesInPackage.get(pkg)?.has(name)) return [{ pkg, name }];
-  const all = packagesByName.get(name) || [];
-  if (all.length === 0) return [];
-  if (all.length === 1) return [{ pkg: all[0], name }];
-  return all.map(p => ({ pkg: p, name }));
+interface Target { pkg: string; name: string; }
+
+/** 一次引用解析的结果：确定的 targets + 真正的「歧义候选」（仅当无法判定时非空） */
+interface Resolution {
+  targets: Target[];
+  ambiguous: string[];
+}
+
+/** 别名链的循环保护 */
+const MAX_ALIAS_DEPTH = 8;
+
+function dedupeTargets(targets: Target[]): Target[] {
+  const seen = new Set<string>();
+  return targets.filter(t => {
+    const key = `${t.pkg}\u0000${t.name}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**
@@ -60,6 +64,7 @@ function resolveTargets(
 export function parseFilesWithCrossFileTypes(
   files: SourceFile[],
   report?: ParseReport,
+  configs: ConfigFile[] = [],
 ): ParsedFiles {
   const fail = (name: string, message: string) => {
     if (!report || report.failures.some(f => f.name === name)) return;
@@ -67,11 +72,11 @@ export function parseFilesWithCrossFileTypes(
   };
 
   // 语义解析（best-effort，失败时返回空映射，后面会回退）
-  const resolution = resolveTypes(files);
+  const resolution = resolveTypes(files, configs);
 
-  // 第一步：收集所有文件的类型名称与类型别名
+  // 第一步：收集所有文件的类型名称、类型别名、import 绑定名
   const allTypeNames = new Set<string>();
-  const allAliases = new Map<string, string>();
+  const aliasesByPackage = new Map<string, Map<string, string>>();
   files.forEach(f => {
     try {
       const info = collectTypeInfo(f.content, f.name);
@@ -79,7 +84,10 @@ export function parseFilesWithCrossFileTypes(
       // 重命名导入（import { A as B }）的本地名也要算作“已知类型”，
       // 否则语法解析阶段会直接把它当外部类型丢掉，轮不到语义解析
       info.imports.forEach(n => allTypeNames.add(n));
-      info.aliases.forEach((target, name) => allAliases.set(name, target));
+      // 类型别名的名字也算“已知类型”：这样引用它的地方会先产出该目标，
+      // 再由 resolve 在「别名定义所在包」的作用域里展开
+      info.aliases.forEach((_text, name) => allTypeNames.add(name));
+      if (info.aliases.size > 0) aliasesByPackage.set(f.name, info.aliases);
       if (info.errors.length > 0) {
         const hint = info.errors.length > 1 ? `${info.errors[0]}（共 ${info.errors.length} 处语法错误）` : info.errors[0];
         fail(f.name, hint);
@@ -94,7 +102,7 @@ export function parseFilesWithCrossFileTypes(
   const results: ParsedFiles = new Map();
   files.forEach(f => {
     try {
-      const parsed = parseCodeWithKnownTypes(f.content, allTypeNames, f.name, allAliases);
+      const parsed = parseCodeWithKnownTypes(f.content, allTypeNames, f.name);
       parsed.classes.forEach(c => {
         c.packageName = f.name;
       });
@@ -144,7 +152,74 @@ export function parseFilesWithCrossFileTypes(
     }
   });
 
+  // 类型别名的全局归属（用于“无 import 但全局唯一”时的兜底）
+  const aliasOwners = new Map<string, string[]>();
+  aliasesByPackage.forEach((table, pkg) => {
+    table.forEach((_text, name) => {
+      const list = aliasOwners.get(name);
+      if (list) {
+        if (!list.includes(pkg)) list.push(pkg);
+      } else {
+        aliasOwners.set(name, [pkg]);
+      }
+    });
+  });
+
   // 第四步：给重名类分配唯一身份 + 把关系端点解析到确切的包
+  //
+  // 解析一个名字（scopePkg = 在哪里看到这个名字）的优先级：
+  //   A. 本包的类型别名 -> 在别名所在包的作用域里展开
+  //   B. import 绑定（语义）-> 指向类型别名则在其定义处展开，否则命中该类
+  //   C. 本包声明的类
+  //   D. 全局唯一的类
+  //   E. 类型别名（全局唯一或多候选）-> 在各自定义处展开
+  //   F. 类的多候选 -> 真正的歧义，返回全部候选并由调用方上报
+  //
+  // 关键点：别名展开后的名字必须回到「别名定义所在包」的作用域解析，
+  // 否则它们会在引用文件里找不到声明，被误判为歧义。
+  const combine = (parts: Resolution[]): Resolution => {
+    const targets = dedupeTargets(parts.flatMap(p => p.targets));
+    const ambiguous = [...new Set(parts.flatMap(p => p.ambiguous))];
+    return { targets, ambiguous };
+  };
+
+  const resolve = (scopePkg: string, name: string, depth = 0): Resolution => {
+    const canExpand = depth < MAX_ALIAS_DEPTH;
+    /** 在 aliasPkg 的作用域里展开一段别名右值 */
+    const expandIn = (aliasPkg: string, text: string): Resolution =>
+      combine(extractTypeNames(text).map(member => resolve(aliasPkg, member, depth + 1)));
+
+    const localAlias = aliasesByPackage.get(scopePkg)?.get(name);
+    if (localAlias !== undefined && canExpand) return expandIn(scopePkg, localAlias);
+
+    const sem = resolution.byFile.get(scopePkg)?.get(name);
+    if (sem && sem.pkg) {
+      const aliasText = aliasesByPackage.get(sem.pkg)?.get(sem.name);
+      if (aliasText !== undefined && canExpand) return expandIn(sem.pkg, aliasText);
+      if (namesInPackage.get(sem.pkg)?.has(sem.name)) {
+        return { targets: [{ pkg: sem.pkg, name: sem.name }], ambiguous: [] };
+      }
+    }
+
+    if (namesInPackage.get(scopePkg)?.has(name)) {
+      return { targets: [{ pkg: scopePkg, name }], ambiguous: [] };
+    }
+
+    const classPkgs = packagesByName.get(name) || [];
+    if (classPkgs.length === 1) return { targets: [{ pkg: classPkgs[0], name }], ambiguous: [] };
+
+    if (classPkgs.length === 0) {
+      const owners = aliasOwners.get(name) || [];
+      if (owners.length > 0 && canExpand) {
+        return combine(owners.map(owner => expandIn(owner, aliasesByPackage.get(owner)!.get(name)!)));
+      }
+      return { targets: [], ambiguous: [] };
+    }
+
+    return { targets: classPkgs.map(p => ({ pkg: p, name })), ambiguous: classPkgs };
+  };
+
+  // 第五步：套用解析结果
   results.forEach((parsed, pkg) => {
     parsed.classes.forEach(c => {
       if (duplicatedNames.has(c.name)) {
@@ -153,21 +228,19 @@ export function parseFilesWithCrossFileTypes(
       }
     });
 
-    const semantic = resolution.byFile.get(pkg);
     const resolvedRelations: Relation[] = [];
-
     parsed.relations.forEach(r => {
-      const targets = resolveTargets(pkg, r.to, namesInPackage, packagesByName, semantic);
-      if (targets.length === 0) return; // 悬空引用，保持现状（不产生关系）
+      const res = resolve(pkg, r.to);
+      if (res.targets.length === 0) return; // 悬空引用，保持现状（不产生关系）
       const from = identityOf(pkg, r.from, duplicatedNames);
-      targets.forEach(t => {
+      res.targets.forEach(t => {
         resolvedRelations.push({ ...r, from, to: identityOf(t.pkg, t.name, duplicatedNames) });
       });
-      if (targets.length > 1) {
-        report?.ambiguous.push({ file: pkg, from: r.from, to: r.to, candidates: targets.map(t => t.pkg) });
+      // 只有“真的无法判定”才上报；别名展开出多个成员不算歧义
+      if (res.ambiguous.length > 0) {
+        report?.ambiguous.push({ file: pkg, from: r.from, to: r.to, candidates: res.ambiguous });
       }
     });
-
     parsed.relations = resolvedRelations;
   });
 

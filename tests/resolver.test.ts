@@ -14,6 +14,12 @@ const build = (files: { name: string; content: string }[], report?: ParseReport)
   return mergeParsedData(parsed).merged;
 };
 
+const buildWithConfigs = (
+  files: { name: string; content: string }[],
+  report: ParseReport,
+  configs: { name: string; content: string }[],
+) => mergeParsedData(parseFilesWithCrossFileTypes(files, report, configs)).merged;
+
 const targetsOf = (merged: ReturnType<typeof build>, from: string) =>
   merged.relations.filter(r => r.from === from).map(r => merged.classes.find(c => c.name === r.to)?.packageName).sort();
 
@@ -157,5 +163,134 @@ describe('语义解析：以 import 声明为唯一依据（与使用位置无�
     ], report);
     expect(merged.relations.filter(r => r.from === 'Use')).toEqual([]);
     expect(report.ambiguous).toEqual([]);
+  });
+});
+
+describe('跨文件类型别名：在别名定义处的作用域里解析', () => {
+  const entryTypes = `
+    export interface MessageEntry { id: string; }
+    export interface CompactionEntry { summary: string; }
+    export interface BranchSummaryEntry { branch: string; }
+    export interface CustomEntry { data: string; }
+    export type Entry = MessageEntry | CompactionEntry | BranchSummaryEntry | CustomEntry;
+  `;
+  const otherPackage = `
+    export interface CompactionEntry { other: number; }
+    export interface BranchSummaryEntry { other: number; }
+    export interface CustomEntry { other: number; }
+  `;
+
+  test('别名展开成联合成员时，在别名所在文件里解析（不再误报歧义）', () => {
+    const report = emptyReport();
+    const merged = build([
+      { name: 'packages/agent/src/harness/session/types.ts', content: entryTypes },
+      { name: 'packages/coding-agent/src/core/session-manager.ts', content: otherPackage },
+      {
+        name: 'packages/agent/src/harness/agent-harness.ts',
+        content: 'import type { Entry } from "./session/types.ts";\nexport interface LaneSnapshot { lane: string; transcript: Entry[]; }',
+      },
+    ], report);
+
+    const targets = merged.relations.filter(r => r.from === 'LaneSnapshot');
+    const pkgs = targets.map(r => merged.classes.find(c => c.name === r.to)?.packageName);
+    // 四个成员都在 types.ts，且都带聚合多重性
+    expect(targets).toHaveLength(4);
+    expect(new Set(pkgs)).toEqual(new Set(['packages/agent/src/harness/session/types.ts']));
+    expect(targets.every(r => r.type === 'aggregation' && r.toMultiplicity === '*')).toBe(true);
+    expect(report.ambiguous).toEqual([]);
+  });
+
+  test('别名 RHS 引用的是别名所在文件 import 进来的类型', () => {
+    const report = emptyReport();
+    const merged = build([
+      { name: 'p/x/types.ts', content: 'export interface Inner { a: string; }' },
+      { name: 'p/y/types.ts', content: 'export interface Inner { b: string; }' },
+      { name: 'p/shared.ts', content: 'import type { Inner } from "./x/types.ts";\nexport type Alias = Inner;' },
+      { name: 'p/use.ts', content: 'import type { Alias } from "./shared.ts";\nexport interface Use { v: Alias; }' },
+    ], report);
+    const rel = merged.relations.find(r => r.from === 'Use');
+    expect(rel).toBeDefined();
+    expect(merged.classes.find(c => c.name === rel!.to)?.packageName).toBe('p/x/types.ts');
+    expect(report.ambiguous).toEqual([]);
+  });
+
+  test('无 import 时全局唯一的别名仍能展开（保留兜底）', () => {
+    const merged = build([
+      { name: 'model.ts', content: 'export class User { id = 1; }' },
+      { name: 'types.ts', content: 'export type UserRef = User;' },
+      { name: 'app.ts', content: 'export class App { u: UserRef; }' },
+    ]);
+    expect(merged.relations.find(r => r.from === 'App' && r.to === 'User')).toBeDefined();
+  });
+
+  test('同文件内的别名展开不受影响', () => {
+    const merged = build([
+      { name: 'a.ts', content: 'export interface A {} export type Ref = A; export class Use { r: Ref; }' },
+    ]);
+    expect(merged.relations.find(r => r.from === 'Use' && r.to === 'A')).toBeDefined();
+  });
+});
+
+describe('workspace 包名（package.json）的解析', () => {
+  const files = [
+    { name: 'packages/chord/src/types.ts', content: 'export interface Context { chord: string; }' },
+    { name: 'packages/chord/src/index.ts', content: 'export * from "./types.ts";' },
+    { name: 'packages/ai/src/types.ts', content: 'export interface Context { ai: string; }' },
+    {
+      name: 'packages/agent/src/harness/env/nodejs.ts',
+      content: 'import type { Context } from "@earendil-works/chord";\nexport interface NodeTextLineReader { ctx: Context; }',
+    },
+  ];
+  const pkg = (dir: string, json: Record<string, unknown>) => ({
+    name: `${dir}/package.json`,
+    content: JSON.stringify(json),
+  });
+
+  test('通过包名 import，经包入口再穿透 barrel，精确命中', () => {
+    const report = emptyReport();
+    const merged = buildWithConfigs(files, report, [
+      pkg('packages/chord', { name: '@earendil-works/chord', types: 'src/index.ts' }),
+    ]);
+    const rel = merged.relations.find(r => r.from === 'NodeTextLineReader');
+    expect(rel).toBeDefined();
+    expect(merged.classes.find(c => c.name === rel!.to)?.packageName).toBe('packages/chord/src/types.ts');
+    expect(report.ambiguous).toEqual([]);
+  });
+
+  test('package.json 没写 types 时回退到 src/index.ts', () => {
+    const report = emptyReport();
+    const merged = buildWithConfigs(files, report, [
+      pkg('packages/chord', { name: '@earendil-works/chord' }),
+    ]);
+    const rel = merged.relations.find(r => r.from === 'NodeTextLineReader');
+    expect(merged.classes.find(c => c.name === rel!.to)?.packageName).toBe('packages/chord/src/types.ts');
+    expect(report.ambiguous).toEqual([]);
+  });
+
+  test('exports 字段里的 types 也能识别', () => {
+    const report = emptyReport();
+    const merged = buildWithConfigs(files, report, [
+      pkg('packages/chord', { name: '@earendil-works/chord', exports: { '.': { types: './src/index.ts' } } }),
+    ]);
+    const rel = merged.relations.find(r => r.from === 'NodeTextLineReader');
+    expect(merged.classes.find(c => c.name === rel!.to)?.packageName).toBe('packages/chord/src/types.ts');
+    expect(report.ambiguous).toEqual([]);
+  });
+
+  test('子路径 import：@scope/pkg/src/types.ts', () => {
+    const report = emptyReport();
+    const merged = buildWithConfigs([
+      files[0],
+      { name: 'packages/agent/src/a.ts', content: 'import type { Context } from "@earendil-works/chord/src/types.ts";\nexport interface Use { c: Context; }' },
+    ], report, [pkg('packages/chord', { name: '@earendil-works/chord' })]);
+    const rel = merged.relations.find(r => r.from === 'Use');
+    expect(merged.classes.find(c => c.name === rel!.to)?.packageName).toBe('packages/chord/src/types.ts');
+    expect(report.ambiguous).toEqual([]);
+  });
+
+  test('没有 package.json 时无法解析，仍报歧义（保持原行为）', () => {
+    const report = emptyReport();
+    buildWithConfigs(files, report, []);
+    expect(report.ambiguous.length).toBeGreaterThan(0);
   });
 });
