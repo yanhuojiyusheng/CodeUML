@@ -48,11 +48,12 @@ npm start -- --debug   # log every HTTP request
 ### Use without the server
 
 ```bash
-npm run build      # bundle to dist/bundle.js
+npm run build      # bundle to dist/bundle.js + dist/typescript.min.js
 # then open index.html directly in a browser
 ```
 
-> The page loads the TypeScript compiler from a CDN, so an internet connection is required.
+> The TypeScript compiler is bundled locally into `dist/typescript.min.js` by `npm run build`,
+> so no internet connection is required.
 
 ## Usage
 
@@ -87,7 +88,7 @@ npm run build      # bundle to dist/bundle.js
 ```
 CodeUML/
 ├── server.js               # Static file server (zero deps, opens the browser)
-├── index.html              # Page shell (loads styles/app.css and dist/bundle.js)
+├── index.html              # Page shell (loads styles/app.css, dist/typescript.min.js and dist/bundle.js)
 ├── styles/
 │   └── app.css             # Page styles
 ├── src/
@@ -115,7 +116,7 @@ CodeUML/
 │       └── zoom.ts         # Zoom & pan
 │
 ├── tests/                  # Tests
-└── dist/                   # Build output (bundle.js)
+└── dist/                   # Build output (bundle.js + vendored typescript.min.js)
 ```
 
 ### Core modules

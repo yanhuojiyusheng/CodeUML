@@ -6,8 +6,9 @@
   "scripts": {
     "start": "npm run build && node server.js",
     "serve": "node server.js",
-    "build": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --target=es2020",
-    "dev": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --target=es2020 --watch",
+    "vendor": "esbuild node_modules/typescript/lib/typescript.js --minify --outfile=dist/typescript.min.js",
+    "build": "npm run vendor && esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --target=es2020",
+    "dev": "npm run vendor && esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --target=es2020 --watch",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",

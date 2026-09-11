@@ -47,11 +47,11 @@ npm start -- --debug   # 打印每条 HTTP 请求
 ### 不用服务器
 
 ```bash
-npm run build      # 打包到 dist/bundle.js
+npm run build      # 打包到 dist/bundle.js + dist/typescript.min.js
 # 然后直接用浏览器打开 index.html
 ```
 
-> 页面从 CDN 加载 TypeScript 编译器，需要联网。
+> TypeScript 编译器由 `npm run build` 打包到本地 `dist/typescript.min.js`，无需联网。
 
 ## 使用
 
@@ -82,7 +82,7 @@ npm run build      # 打包到 dist/bundle.js
 ```
 CodeUML/
 ├── server.js               # 静态文件服务器（零依赖，启动后打开浏览器）
-├── index.html              # 页面骨架（引入 styles/app.css 与 dist/bundle.js）
+├── index.html              # 页面骨架（引入 styles/app.css、dist/typescript.min.js 与 dist/bundle.js）
 ├── styles/
 │   └── app.css             # 页面样式
 ├── src/
@@ -110,7 +110,7 @@ CodeUML/
 │       └── zoom.ts         # 缩放与平移
 │
 ├── tests/                  # 测试
-└── dist/                   # 构建输出（bundle.js）
+└── dist/                   # 构建输出（bundle.js + 本地化的 typescript.min.js）
 ```
 
 ### 核心模块
@@ -130,7 +130,7 @@ CodeUML/
 
 ```bash
 npm run dev            # 监听构建
-npm run build          # 打包到 dist/bundle.js
+npm run build          # 打包到 dist/bundle.js + dist/typescript.min.js
 npm test               # 运行测试（默认不收集覆盖率）
 npm run test:coverage  # 运行测试并生成覆盖率报告
 npm run typecheck      # 类型检查

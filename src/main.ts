@@ -63,6 +63,10 @@ function mergeAllParsed(): Map<string, ParsedData> {
 
 /** 更新所有视图（合并视图） */
 function updateAll() {
+  if (typeof (window as any).ts === 'undefined') {
+    diagramEl.innerHTML = '<p style="padding:16px;color:#b00">TypeScript 编译器未加载：请先运行 <code>npm run build</code>（生成 dist/typescript.min.js）后刷新页面。</p>';
+    return;
+  }
   try {
     const allParsed = mergeAllParsed();
     const { merged, classPackageMap } = mergeParsedData(allParsed);
