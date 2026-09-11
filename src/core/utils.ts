@@ -77,6 +77,21 @@ export function splitSourcePath(path: string): { folder: string; name: string } 
   return { folder: parts.join('/'), name };
 }
 
+/** 点到线段的最短距离（不是点到直线的距离：超出端点时按端算） */
+export function distanceToSegment(
+  px: number, py: number,
+  x1: number, y1: number,
+  x2: number, y2: number,
+): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(px - x1, py - y1); // 退化成点
+  let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
 /** 生成关系的唯一标识（用于高亮等场景） */
 export function relationKey(r: { from: string; type: string; to: string }): string {
   return `${r.from}|${r.type}|${r.to}`;

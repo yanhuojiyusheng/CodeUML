@@ -98,6 +98,8 @@ textarea{width:100%;height:100%;background:#fff;color:#333;border:none;padding:1
 #diagram-view.active,#xml-view.active,#parsed-view.active{display:block}
 #diagram-view{background:#fafafa;padding:20px}
 #diagram-view.panning{cursor:grabbing}
+/* 悬停到关系线附近时给出手型提示（热区元素已移除，由 JS 几何命中去切换） */
+#diagram-view.over-relation{cursor:pointer}
 #xml-view textarea,#parsed-view textarea{background:#fff;color:#333;width:100%;height:100%;border:none;padding:12px;font-family:'Fira Code','Cascadia Code',monospace;font-size:13px;resize:none;outline:none;line-height:1.5}
 .class-box rect{stroke:#333;stroke-width:1.5;rx:2}
 .class-box text{font-family:system-ui,sans-serif;font-size:12px}
@@ -108,19 +110,19 @@ textarea{width:100%;height:100%;background:#fff;color:#333;border:none;padding:1
 #diagram-view .relation{cursor:pointer}
 #diagram-view .class-box{cursor:pointer}
 /* 双击线：橙色高亮，强弱决定粗细/透明度 */
-#diagram-view .relation.highlighted line:not(.hit),
+#diagram-view .relation.highlighted line,
 #diagram-view .relation.highlighted polygon,
 #diagram-view .relation.highlighted path{stroke:#ff6b00;stroke-width:calc(var(--hl-width,3) * 1px);opacity:var(--hl-opacity,1)}
 #diagram-view .relation.highlighted polygon{fill:#ffd9b3}
 #diagram-view .relation.highlighted text{fill:#e65100;font-weight:bold}
 #diagram-view .relation.highlighted{filter:drop-shadow(0 0 3px rgba(255,107,0,0.75))}
 /* 单击类：连入的蓝色、发出的橙色（发出规则在后，自环时橙色优先） */
-#diagram-view .relation.incoming line:not(.hit),
+#diagram-view .relation.incoming line,
 #diagram-view .relation.incoming polygon,
 #diagram-view .relation.incoming path{stroke:#1e88e5;stroke-width:calc(var(--hl-width,3) * 1px);opacity:var(--hl-opacity,1)}
 #diagram-view .relation.incoming polygon{fill:#bbdefb}
 #diagram-view .relation.incoming text{fill:#0d47a1;font-weight:bold}
-#diagram-view .relation.outgoing line:not(.hit),
+#diagram-view .relation.outgoing line,
 #diagram-view .relation.outgoing polygon,
 #diagram-view .relation.outgoing path{stroke:#ff6b00;stroke-width:calc(var(--hl-width,3) * 1px);opacity:var(--hl-opacity,1)}
 #diagram-view .relation.outgoing polygon{fill:#ffd9b3}

@@ -29,9 +29,6 @@ function renderRelation(r: Line, highlightKey?: string | null): string {
 
   let svg = '';
 
-  // 透明加粗命中线，方便双击选中整条关系
-  svg += `<line class="hit" x1="${r.fx}" y1="${r.fy}" x2="${r.tx}" y2="${r.ty}" stroke="transparent" stroke-width="12" fill="none" pointer-events="stroke"/>`;
-
   switch (r.type) {
     case 'extends': {
       const { TRI_LEN, TRI_W } = ARROW;
