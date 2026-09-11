@@ -293,12 +293,15 @@ const BASIC_TYPES = new Set([
   'Buffer', 'NodeJS',
 ]);
 
-// 判断是否是用户定义的类型（类/接口/枚举）
+// 判断是否是用户定义的类型（类/接口/枚举，或已知命名空间的限定名 NS.Type）
 function isUserType(typeName: string, knownTypes: Set<string>): boolean {
   if (!typeName) return false;
   if (BASIC_TYPES.has(typeName)) return false;
   if (typeName.startsWith('typeof ') || typeName.startsWith('keyof ') || typeName.startsWith('import(')) return false;
   if (typeName.startsWith('{') || typeName.startsWith('[')) return false; // 元组和对象字面量
+  // 命名空间限定名：NS.Type（NS 必须是已知的导入名）
+  const dot = typeName.indexOf('.');
+  if (dot > 0) return knownTypes.has(typeName.slice(0, dot));
   return knownTypes.has(typeName);
 }
 
@@ -438,6 +441,25 @@ export function parseCodeWithKnownTypes(
             kind: 'method',
             modifier: '+',
             name: m.name.getText(sf),
+            type: getReturnType(m, sf),
+            params
+          }, false);
+        } else if (ts.isIndexSignatureDeclaration(m)) {
+          // [key: string]: V -> 一条属性成员
+          const key = m.parameters[0];
+          members.push({
+            kind: 'property',
+            modifier: '+',
+            name: `[${key ? key.getText(sf) : 'key: string'}]`,
+            type: m.type?.getText(sf) || ''
+          });
+        } else if (ts.isCallSignatureDeclaration(m) || ts.isConstructSignatureDeclaration(m)) {
+          // (x: T): R  /  new (x: T): R
+          const params = m.parameters.map((p: any) => p.getText(sf)).join(', ');
+          addMethod({
+            kind: 'method',
+            modifier: '+',
+            name: ts.isConstructSignatureDeclaration(m) ? '(new)' : '(call)',
             type: getReturnType(m, sf),
             params
           }, false);
@@ -612,6 +634,15 @@ export function parseCodeWithKnownTypes(
             fieldName: m.name.getText(sf),
             typeText: m.type?.getText(sf) || '',
             isOptional: !!m.questionToken,
+            isNew: false,
+          });
+        } else if (ts.isIndexSignatureDeclaration(m)) {
+          // 索引签名的值类型也算引用（如 [k: string]: Foo）
+          const key = m.parameters[0];
+          propertyEntries.push({
+            fieldName: `[${key ? key.getText(sf) : 'key: string'}]`,
+            typeText: m.type?.getText(sf) || '',
+            isOptional: false,
             isNew: false,
           });
         }

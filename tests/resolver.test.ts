@@ -294,3 +294,81 @@ describe('workspace 包名（package.json）的解析', () => {
     expect(report.ambiguous.length).toBeGreaterThan(0);
   });
 });
+
+describe('命名空间限定引用 NS.Type', () => {
+  test('import * as NS 后 NS.Type 能精确解析（不再静默丢关系）', () => {
+    const report = emptyReport();
+    const merged = build([
+      { name: 'p/types.ts', content: 'export interface Context { a: string; }' },
+      { name: 'p/other.ts', content: 'export interface Context { b: string; }' },
+      { name: 'p/use.ts', content: 'import * as T from "./types.ts";\nexport interface Use { ctx: T.Context; }' },
+    ], report);
+    const rel = merged.relations.find(r => r.from === 'Use');
+    expect(rel).toBeDefined();
+    expect(merged.classes.find(c => c.name === rel!.to)?.packageName).toBe('p/types.ts');
+    expect(report.ambiguous).toEqual([]);
+  });
+
+  test('命名空间下不存在的名字不产生关系', () => {
+    const merged = build([
+      { name: 'p/types.ts', content: 'export interface Context { a: string; }' },
+      { name: 'p/use.ts', content: 'import * as T from "./types.ts";\nexport interface Use { nope: T.Missing; }' },
+    ]);
+    expect(merged.relations.filter(r => r.from === 'Use')).toEqual([]);
+  });
+
+  test('外部包的命名空间限定名不会误连到同名本地类', () => {
+    const merged = build([
+      { name: 'p/types.ts', content: 'export interface Thing { a: string; }' },
+      { name: 'p/use.ts', content: 'import * as NodeJS from "node:types";\nexport interface Use { t: NodeJS.Thing; }' },
+    ]);
+    expect(merged.relations.filter(r => r.from === 'Use')).toEqual([]);
+  });
+});
+
+describe('tsconfig paths（按引用方就近匹配）', () => {
+  const files = [
+    { name: 'packages/a/src/types.ts', content: 'export interface Context { a: string; }' },
+    { name: 'packages/b/src/types.ts', content: 'export interface Context { b: string; }' },
+    { name: 'packages/a/src/use.ts', content: 'import type { Context } from "@/types.ts";\nexport interface UseA { c: Context; }' },
+    { name: 'packages/b/src/use.ts', content: 'import type { Context } from "@/types.ts";\nexport interface UseB { c: Context; }' },
+  ];
+  const tsconfig = (dir: string, json: Record<string, unknown>) => ({
+    name: `${dir}/tsconfig.json`,
+    content: JSON.stringify(json),
+  });
+
+  test('两个包各自的 @/* 就近解析到本包的 src', () => {
+    const report = emptyReport();
+    const merged = buildWithConfigs(files, report, [
+      tsconfig('packages/a', { compilerOptions: { baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+      tsconfig('packages/b', { compilerOptions: { baseUrl: '.', paths: { '@/*': ['src/*'] } } }),
+    ]);
+    const a = merged.relations.find(r => r.from === 'UseA');
+    const b = merged.relations.find(r => r.from === 'UseB');
+    expect(merged.classes.find(c => c.name === a!.to)?.packageName).toBe('packages/a/src/types.ts');
+    expect(merged.classes.find(c => c.name === b!.to)?.packageName).toBe('packages/b/src/types.ts');
+    expect(report.ambiguous).toEqual([]);
+  });
+
+  test('extends 基础 tsconfig 时也能继承 paths（相对声明处解析）', () => {
+    const report = emptyReport();
+    const merged = buildWithConfigs([
+      { name: 'packages/shared/src/types.ts', content: 'export interface Shared { a: string; }' },
+      { name: 'packages/a/src/use.ts', content: 'import type { Shared } from "@shared/types.ts";\nexport interface UseA { s: Shared; }' },
+    ], report, [
+      { name: 'tsconfig.base.json', content: JSON.stringify({ compilerOptions: { baseUrl: '.', paths: { '@shared/*': ['packages/shared/src/*'] } } }) },
+      tsconfig('packages/a', { extends: '../../tsconfig.base.json' }),
+    ]);
+    const rel = merged.relations.find(r => r.from === 'UseA');
+    expect(rel).toBeDefined();
+    expect(merged.classes.find(c => c.name === rel!.to)?.packageName).toBe('packages/shared/src/types.ts');
+    expect(report.ambiguous).toEqual([]);
+  });
+
+  test('没有 tsconfig 时路径别名无法解析（保持原行为）', () => {
+    const report = emptyReport();
+    buildWithConfigs(files, report, []);
+    expect(report.ambiguous.length).toBeGreaterThan(0);
+  });
+});

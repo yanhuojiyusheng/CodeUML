@@ -310,8 +310,8 @@ editorPane.addEventListener('drop', async (e) => {
 /** 拖入时忽略的目录 */
 const SKIP_DIRS = new Set(['dist', 'node_modules']);
 
-/** 仅用于模块解析的配置文件（package.json），不作为图表内容 */
-const CONFIG_FILE_RE = /(^|\/)package\.json$/i;
+/** 仅用于模块解析的配置文件（package.json / tsconfig*.json），不作为图表内容 */
+const CONFIG_FILE_RE = /(^|\/)(package\.json|tsconfig(\.[^/]*)?\.json)$/i;
 let configFiles: { name: string; content: string }[] = [];
 
 /** 递归收集拖入文件夹中的 .ts/.tsx（每读到一个就回调，边读边加；跳过 dist / node_modules） */

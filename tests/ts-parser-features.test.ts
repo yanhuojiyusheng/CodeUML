@@ -246,3 +246,38 @@ describe('解析失败上报', () => {
     expect(parsed.get('ok.ts')?.classes.map(c => c.name)).toEqual(['Ok']);
   });
 });
+
+describe('索引签名与调用签名', () => {
+  test('接口索引签名成为一条成员', () => {
+    const r = parseCode('interface Dict { [key: string]: number; read(): void; }');
+    const m = r.classes[0].members.find(x => x.name.includes('[key'));
+    expect(m).toBeDefined();
+    expect(m!.type).toBe('number');
+  });
+
+  test('索引签名的值类型是用户类型时产生关系', () => {
+    const r = parseCode('class Foo {} interface Dict { [k: string]: Foo; }');
+    expect(r.relations.find(x => x.from === 'Dict' && x.to === 'Foo' && x.type === 'association')).toBeDefined();
+  });
+
+  test('调用签名成为一条成员', () => {
+    const r = parseCode('interface Fn { (x: string): number; }');
+    const m = r.classes[0].members.find(x => x.kind === 'method');
+    expect(m).toBeDefined();
+    expect(m!.params).toContain('x: string');
+    expect(m!.type).toBe('number');
+  });
+
+  test('构造签名也成为一条成员', () => {
+    const r = parseCode('interface Ctor { new (x: string): Object; }');
+    const m = r.classes[0].members.find(x => x.kind === 'method');
+    expect(m).toBeDefined();
+    expect(m!.params).toContain('x: string');
+  });
+
+  test('普通接口方法不受影响', () => {
+    const r = parseCode('interface Svc { run(a: string): void; }');
+    expect(r.classes[0].members.filter(x => x.kind === 'method')).toHaveLength(1);
+    expect(r.classes[0].members[0].name).toBe('run');
+  });
+});

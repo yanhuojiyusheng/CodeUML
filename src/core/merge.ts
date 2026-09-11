@@ -189,11 +189,22 @@ export function parseFilesWithCrossFileTypes(
     const expandIn = (aliasPkg: string, text: string): Resolution =>
       combine(extractTypeNames(text).map(member => resolve(aliasPkg, member, depth + 1)));
 
+    // 命名空间限定名 NS.Type：先解 NS，再在它所属包里解 Type
+    const dot = name.indexOf('.');
+    if (dot > 0) {
+      const parts = resolve(scopePkg, name.slice(0, dot), depth).targets
+        .filter(t => t.name === '') // 只有命名空间标记才能作为前缀
+        .map(t => resolve(t.pkg, name.slice(dot + 1), depth + 1));
+      return parts.length > 0 ? combine(parts) : { targets: [], ambiguous: [] };
+    }
+
     const localAlias = aliasesByPackage.get(scopePkg)?.get(name);
     if (localAlias !== undefined && canExpand) return expandIn(scopePkg, localAlias);
 
     const sem = resolution.byFile.get(scopePkg)?.get(name);
     if (sem && sem.pkg) {
+      // 命名空间标记：交给上层的限定名处理，本身不是类型
+      if (sem.name === '') return { targets: [{ pkg: sem.pkg, name: '' }], ambiguous: [] };
       const aliasText = aliasesByPackage.get(sem.pkg)?.get(sem.name);
       if (aliasText !== undefined && canExpand) return expandIn(sem.pkg, aliasText);
       if (namesInPackage.get(sem.pkg)?.has(sem.name)) {

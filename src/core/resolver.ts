@@ -117,6 +117,93 @@ function declaredNameOf(sym: any, decl: any): string {
   return sym.getName();
 }
 
+/** 目录名（包名统一用 /） */
+function dirname(p: string): string {
+  const i = p.lastIndexOf('/');
+  return i < 0 ? '' : p.slice(0, i);
+}
+
+/** 拼接并归一化路径（处理 . 与 ..） */
+function joinPath(a: string, b: string): string {
+  const out: string[] = [];
+  for (const seg of [...(a ? a.split('/') : []), ...b.split('/')]) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') out.pop();
+    else out.push(seg);
+  }
+  return out.join('/');
+}
+
+interface ResolvedTsconfig {
+  dir: string;                              // tsconfig 所在目录
+  paths: Record<string, string[]> | null;   // 值已归一成虚拟绝对路径
+}
+
+/** `extends` 的引用路径（仅支持相对路径） */
+function resolveConfigRef(fromName: string, ref: string): string | null {
+  if (!ref.startsWith('.')) return null; // 包名形式的 extends 不支持
+  const base = joinPath(dirname(fromName), ref);
+  return base.toLowerCase().endsWith('.json') ? base : `${base}.json`;
+}
+
+/**
+ * 解析所有 tsconfig（含 extends 继承），把 paths 归一成虚拟绝对路径。
+ * baseUrl/paths 是相对于「声明它的那份 tsconfig」解析的，extends 也是这个语义。
+ */
+function loadTsconfigs(configs: ConfigFile[]): ResolvedTsconfig[] {
+  const contents = new Map(configs.map(c => [c.name, c.content]));
+  const cache = new Map<string, ResolvedTsconfig | null>();
+
+  const load = (name: string, seen: Set<string>): ResolvedTsconfig | null => {
+    if (cache.has(name)) return cache.get(name)!;
+    if (seen.has(name)) return null; // extends 成环
+    seen.add(name);
+    const content = contents.get(name);
+    if (content === undefined) return null;
+    let json: any;
+    try {
+      json = JSON.parse(content);
+    } catch {
+      return null;
+    }
+
+    let inherited: ResolvedTsconfig | null = null;
+    if (typeof json?.extends === 'string') {
+      const ref = resolveConfigRef(name, json.extends);
+      if (ref) inherited = load(ref, seen);
+    }
+
+    const dir = dirname(name);
+    // 统一成虚拟绝对目录（带前导 /），才能和 containingFile 做前缀匹配；根目录用空串
+    const vdir = dir ? toVirtualPath(dir) : '';
+    const co = json?.compilerOptions ?? {};
+    let paths = inherited?.paths ?? null;
+    if (co.paths && typeof co.paths === 'object') {
+      const base = typeof co.baseUrl === 'string' ? joinPath(vdir, co.baseUrl) : vdir;
+      paths = {};
+      for (const [pattern, targets] of Object.entries(co.paths as Record<string, unknown>)) {
+        if (!Array.isArray(targets)) continue;
+        paths[pattern] = targets
+          .filter((t): t is string => typeof t === 'string')
+          .map(t => toVirtualPath(joinPath(base, t)));
+      }
+    }
+
+    const resolved: ResolvedTsconfig = { dir: vdir, paths };
+    cache.set(name, resolved);
+    return resolved;
+  };
+
+  const out: ResolvedTsconfig[] = [];
+  for (const cfg of configs) {
+    if (!/(^|\/)tsconfig(\.[^/]*)?\.json$/i.test(cfg.name)) continue;
+    const resolved = load(cfg.name, new Set());
+    if (resolved?.paths) out.push(resolved);
+  }
+  // 目录深的优先，便于「就近匹配」；根目录（''）排最后
+  return out.sort((a, b) => b.dir.length - a.dir.length);
+}
+
 function scriptKindFor(fileName: string) {
   const n = fileName.toLowerCase();
   if (n.endsWith('.tsx')) return ts.ScriptKind.TSX;
@@ -146,6 +233,7 @@ export function resolveTypes(files: SourceFile[], configs: ConfigFile[] = []): T
     // 只需要解析用户自己的类型，不需要 lib（noLib），也不必做类型检查
     // paths：把 workspace 包名（@scope/pkg）映射到实际文件，否则裸包名无法解析
     const packagePaths = buildPackagePaths(configs);
+    const tsconfigs = loadTsconfigs(configs);
     const options = {
       target: ts.ScriptTarget.ES2020,
       module: ts.ModuleKind.ESNext,
@@ -156,6 +244,14 @@ export function resolveTypes(files: SourceFile[], configs: ConfigFile[] = []): T
       allowJs: true,
       checkJs: false,
       ...(Object.keys(packagePaths).length > 0 ? { baseUrl: '/', paths: packagePaths } : {}),
+    };
+
+    /** 对某个文件应用「就近的 tsconfig paths」（值已经是绝对虚拟路径） */
+    const pathsFor = (containingFile: string) => {
+      const dir = dirname(containingFile);
+      const hit = tsconfigs.find(c => c.dir === '' || dir === c.dir || dir.startsWith(c.dir + '/'));
+      if (!hit?.paths) return null;
+      return { baseUrl: '/', paths: { ...packagePaths, ...hit.paths } };
     };
 
     const host = {
@@ -172,6 +268,12 @@ export function resolveTypes(files: SourceFile[], configs: ConfigFile[] = []): T
       getNewLine: () => '\n',
       fileExists: (f: string) => contents.has(f),
       readFile: (f: string) => contents.get(f),
+      // 让每个文件用它自己就近的 tsconfig paths，而不是全局一套
+      resolveModuleNames: (moduleNames: string[], containingFile: string) => {
+        const per = pathsFor(containingFile);
+        const opts = per ? { ...options, ...per } : options;
+        return moduleNames.map(n => ts.resolveModuleName(n, containingFile, opts, host).resolvedModule);
+      },
     };
 
     const program = ts.createProgram(roots, options, host);
@@ -183,8 +285,8 @@ export function resolveTypes(files: SourceFile[], configs: ConfigFile[] = []): T
       if (!sf) continue; // 解析失败的 root
       const map = new Map<string, ResolvedType>();
 
-      /** 把一个导入绑定名解析成「真正的声明」 */
-      const record = (nameNode: any) => {
+    /** 把一个导入绑定名解析成「真正的声明」；isNamespace 表示 `import * as NS`，name 记为空字符串 */
+      const record = (nameNode: any, isNamespace = false) => {
         if (!nameNode || !ts.isIdentifier(nameNode)) return;
         const localName: string = nameNode.text;
         if (!localName) return;
@@ -196,7 +298,9 @@ export function resolveTypes(files: SourceFile[], configs: ConfigFile[] = []): T
           const declFile = decl?.getSourceFile()?.fileName;
           const target = declFile ? pathToPackage.get(declFile) : undefined;
           if (target === undefined) return; // 内置类型 / 不在文件集里的外部包
-          const resolved: ResolvedType = { pkg: target, name: declaredNameOf(sym, decl) };
+          const resolved: ResolvedType = isNamespace
+            ? { pkg: target, name: '' } // 命名空间本身不是类型，仅用作限定名前缀
+            : { pkg: target, name: declaredNameOf(sym, decl) };
           const existing = map.get(localName);
           // 同一本地名指向不同声明 -> 标记为不可用，交给调用方兜底
           if (existing !== undefined && (existing.pkg !== resolved.pkg || existing.name !== resolved.name)) {
@@ -215,11 +319,13 @@ export function resolveTypes(files: SourceFile[], configs: ConfigFile[] = []): T
         const clause = stmt.importClause;
         if (clause.name) record(clause.name); // import X from '...'
         const bindings = clause.namedBindings;
-        if (bindings && ts.isNamedImports(bindings)) {
+        if (bindings && ts.isNamespaceImport(bindings)) {
+          // import * as NS from '...' -> 只用于 NS.Type 限定引用
+          record(bindings.name, true);
+        } else if (bindings && ts.isNamedImports(bindings)) {
           // import { A, B as C, type D } from '...' -> 本地名是 el.name
           for (const el of bindings.elements) record(el.name);
         }
-        // import * as NS from '...' 只能作为限定名的前缀，不能单独作为类型参与关系，跳过
       }
 
       byFile.set(f.name, map);
