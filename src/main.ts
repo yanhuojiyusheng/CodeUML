@@ -25,6 +25,7 @@ const editorPane = byId<HTMLDivElement>('editor-pane');
 const fileTabsEl = byId<HTMLDivElement>('file-tabs');
 const fileSidebarEl = byId<HTMLDivElement>('file-sidebar');
 const sidebarToggle = byId<HTMLButtonElement>('sidebar-toggle');
+const editorToggle = byId<HTMLButtonElement>('editor-toggle');
 const foldToggleBtn = byId<HTMLButtonElement>('fold-toggle');
 const visibilityToggleBtn = byId<HTMLButtonElement>('visibility-toggle');
 const sidebarResizer = byId<HTMLDivElement>('sidebar-resizer');
@@ -271,6 +272,8 @@ createSplitPanes({
   fileSidebar: fileSidebarEl,
   sidebarResizer,
   sidebarToggle,
+  editorPane,
+  editorToggle,
 });
 
 // ---------------- 初始化：加载示例 ----------------

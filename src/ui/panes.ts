@@ -6,8 +6,10 @@ export function createSplitPanes(opts: {
   fileSidebar: HTMLElement;
   sidebarResizer: HTMLElement;
   sidebarToggle: HTMLButtonElement;
+  editorPane: HTMLElement;
+  editorToggle: HTMLButtonElement;
 }): void {
-  const { rightPane, divider, fileSidebar, sidebarResizer, sidebarToggle } = opts;
+  const { rightPane, divider, fileSidebar, sidebarResizer, sidebarToggle, editorPane, editorToggle } = opts;
 
   // ---------------- 右侧图表区宽度 ----------------
   let dividerDragging = false;
@@ -154,7 +156,7 @@ export function createSplitPanes(opts: {
 
   // 窗口缩放时，重新约束右侧面板与文件栏宽度
   window.addEventListener('resize', () => {
-    if (rightPane.style.flex) {
+    if (rightPane.style.flex && !editorPane.classList.contains('collapsed')) {
       setRightWidth(rightPane.getBoundingClientRect().width);
     }
     if (!fileSidebar.classList.contains('collapsed') && fileSidebar.style.getPropertyValue('--sidebar-width')) {
@@ -162,22 +164,42 @@ export function createSplitPanes(opts: {
     }
   });
 
-  // ---------------- 文件栏折叠/展开 ----------------
-  function toggleSidebar() {
-    const collapsed = fileSidebar.classList.toggle('collapsed');
-    sidebarToggle.textContent = collapsed ? '»' : '«';
-    sidebarToggle.title = collapsed ? '展开文件栏' : '折叠文件栏';
+  // ---------------- 折叠 / 展开（文件栏、编辑区共用同一套交互） ----------------
+  function bindCollapse(
+    pane: HTMLElement,
+    btn: HTMLButtonElement,
+    labels: { expand: string; collapse: string },
+    onToggle?: (collapsed: boolean) => void,
+  ) {
+    const toggle = () => {
+      const collapsed = pane.classList.toggle('collapsed');
+      btn.textContent = collapsed ? '»' : '«';
+      btn.title = collapsed ? labels.expand : labels.collapse;
+      onToggle?.(collapsed);
+    };
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggle();
+    });
+    // 折叠状态下点击整条竖栏可展开
+    pane.addEventListener('click', () => {
+      if (pane.classList.contains('collapsed')) toggle();
+    });
   }
 
-  sidebarToggle.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleSidebar();
-  });
+  bindCollapse(fileSidebar, sidebarToggle, { expand: '展开文件栏', collapse: '折叠文件栏' });
 
-  // 折叠状态下点击整条竖栏可展开
-  fileSidebar.addEventListener('click', () => {
-    if (fileSidebar.classList.contains('collapsed')) {
-      toggleSidebar();
+  // 编辑区收起时把空间让给图表区，展开时恢复原宽度
+  let savedRightWidth: { flex: string; width: string } | null = null;
+  bindCollapse(editorPane, editorToggle, { expand: '展开编辑区', collapse: '收起编辑区' }, (collapsed) => {
+    if (collapsed) {
+      savedRightWidth = { flex: rightPane.style.flex, width: rightPane.style.width };
+      rightPane.style.flex = '1 1 auto';
+      rightPane.style.width = 'auto';
+    } else if (savedRightWidth) {
+      rightPane.style.flex = savedRightWidth.flex;
+      rightPane.style.width = savedRightWidth.width;
+      savedRightWidth = null;
     }
   });
 }

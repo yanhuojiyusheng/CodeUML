@@ -18,8 +18,8 @@ main{flex:1;display:flex;overflow:hidden}
 #file-sidebar.resizing{transition:none}
 #sidebar-header{display:flex;align-items:center;justify-content:flex-end;padding:4px;flex:0 0 auto}
 #file-sidebar.collapsed #sidebar-header{justify-content:center;padding:4px 0}
-#sidebar-toggle,#fold-toggle,#visibility-toggle{background:none;border:none;color:#666;font-size:14px;cursor:pointer;padding:4px 8px;border-radius:3px}
-#sidebar-toggle:hover,#fold-toggle:hover,#visibility-toggle:hover{background:#e0e0e0;color:#000}
+#sidebar-toggle,#fold-toggle,#visibility-toggle,#editor-toggle{background:none;border:none;color:#666;font-size:14px;cursor:pointer;padding:4px 8px;border-radius:3px}
+#sidebar-toggle:hover,#fold-toggle:hover,#visibility-toggle:hover,#editor-toggle:hover{background:#e0e0e0;color:#000}
 #visibility-toggle.off{opacity:.35}
 #file-sidebar.collapsed #fold-toggle,#file-sidebar.collapsed #visibility-toggle{display:none}
 #file-sidebar.collapsed #file-tabs{display:none}
@@ -53,7 +53,12 @@ main{flex:1;display:flex;overflow:hidden}
 .file-tab.add-tab:hover{background:#e8e8e8;color:#0a9e85}
 #divider{width:6px;cursor:col-resize;background:#e0e0e0;flex:none;transition:background .15s}
 #divider:hover,#divider.dragging{background:#0078d4}
-#editor-pane{flex:1;display:flex;flex-direction:column;min-width:200px}
+#editor-pane{flex:1;display:flex;flex-direction:column;min-width:200px;transition:flex-basis .2s}
+#editor-pane.collapsed{flex:0 0 36px;min-width:36px}
+#editor-header{display:flex;align-items:center;justify-content:flex-end;padding:4px;flex:0 0 auto}
+#editor-pane.collapsed #editor-header{justify-content:center;padding:4px 0}
+#editor-pane.collapsed #code-container{display:none}
+#editor-pane.collapsed + #divider{display:none}
 #editor-pane.drag-over{background:#eef5ff;border:2px dashed #0078d4}
 #code-container{flex:1;overflow:hidden;position:relative}
 textarea{width:100%;height:100%;background:#fff;color:#333;border:none;padding:12px;font-family:'Fira Code','Cascadia Code',monospace;font-size:13px;resize:none;outline:none;line-height:1.5}
