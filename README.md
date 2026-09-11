@@ -1,91 +1,98 @@
 # CodeUML
 
-Turn TypeScript source code into UML class diagrams, right in the browser.
+**Generate UML class diagrams from TypeScript — in your browser, without uploading your code.**
 
-**English** | [简体中文](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-## Features
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)](#tech-stack)
+[![Runs offline](https://img.shields.io/badge/runs-offline-brightgreen.svg)](#faq)
 
-- 🔄 **Real-time parsing** — the diagram updates as you type
-- 📊 Supports **classes, interfaces, abstract classes and enums**
-- 🔗 Detects **inheritance, implementation, association, aggregation, composition and dependency**
-- 🗂️ **Multi-file projects** — drag in a folder and files are grouped into packages
-  (package name = folder path + file name)
-- 🔍 **Zoom & pan** — Ctrl/⌘ + wheel or the toolbar buttons, middle-mouse drag to pan
-- 🎯 **Highlighting** — click a class to highlight its relations, double-click a relation to highlight it and both ends
-- 🎚️ **Relation strength modes** — show all relations, or only the stronger ones
-- 📥 **Export** to Draw.io XML, SVG and PlantUML
-- ⚪ Light theme by default
-- 🚀 **Zero-dependency** static web server (Node built-in `http`)
+![CodeUML screenshot](docs/screenshot.png)
 
-## Getting Started
+CodeUML reads real **TypeScript / TSX** source and draws a **UML class diagram** of it —
+classes, interfaces, abstract classes, enums, generics, `{readonly}`/`{static}`/`{abstract}`
+members and all six UML relation types. Drop in a folder (a whole **monorepo** is fine) and it
+groups files into packages, resolves cross-package references with the TypeScript compiler's own
+module resolution, and exports to **Draw.io XML**, **SVG** or **PlantUML**.
 
-### Requirements
+> Keywords: typescript uml · uml class diagram generator · typescript class diagram ·
+> code to uml · typescript to plantuml · drawio export · code visualization · monorepo ·
+> ast parser · offline · self-hosted
 
-- Node.js 18+
+## Why this exists
 
-### Install
+Existing options usually ask you to *describe* the diagram by hand:
+
+| | CodeUML | Mermaid / PlantUML | IDE plugins |
+|---|---|---|---|
+| **Input** | your actual `.ts` / `.tsx` files | a diagram you write yourself | whatever the plugin supports |
+| **Cross-file references** | ✅ resolved with the TypeScript compiler (imports, re-exports, `tsconfig` `paths`, workspace package names) | ❌ you wire it up manually | ⚠️ varies |
+| **Where it runs** | in the browser; your code never leaves the page | browser / server / plugin | inside the IDE |
+| **Export** | Draw.io XML, SVG, PlantUML | SVG / PNG / … | screenshots |
+
+Typical uses: onboarding into an unfamiliar codebase, reviewing a PR's structural impact,
+writing design docs, or checking that your packages don't depend on the wrong things.
+
+## Quick start
 
 ```bash
 git clone https://github.com/yanhuojiyusheng/CodeUML.git
 cd CodeUML
 npm install
+npm start          # build + serve + open http://localhost:3000
 ```
 
-### Run as a web server
+Requires **Node.js 18+**. Change the port with `PORT=8080 npm start`; log every request with
+`npm start -- --debug`.
 
-```bash
-npm start          # build + start the server + open the browser
-```
+## Features
 
-Default address is `http://localhost:3000` (change with the `PORT` environment variable).
-
-```bash
-PORT=8080 npm start
-npm start -- --debug   # log every HTTP request
-```
-
-### Use without the server
-
-```bash
-npm run build      # bundle to dist/bundle.js + dist/typescript.min.js
-# then open index.html directly in a browser
-```
-
-> The TypeScript compiler is bundled locally into `dist/typescript.min.js` by `npm run build`,
-> so no internet connection is required.
+- 🔄 **Live** — the diagram updates as you type (debounced, cached per file)
+- 📊 **Classes, interfaces, abstract classes, enums** — plus generics (`Repository<T>`),
+  `{static}` / `{abstract}` / `{readonly}` markers and class-level decorators as `«stereotype»`
+- 🔗 **All six UML relations** — inheritance, implementation, association, aggregation,
+  composition, dependency — with multiplicities
+- 🗂️ **Folders & packages** — drop a folder (recursively read, `.ts` / `.tsx`), or create folders
+  by hand; package name = folder path + file name
+- 🌐 **Cross-package resolution** — `import` / `export *` barrels / renamed imports /
+  `import * as NS` / `tsconfig` `paths` aliases / workspace package names from `package.json`
+- 🧩 **Same class name in several packages** — nothing is dropped: both are drawn with a
+  package-qualified title, references go to the right one, and anything genuinely ambiguous is
+  reported (never silently guessed)
+- 👁 **Visibility** — hide a file or a folder with the 👁 toggle to exclude it from the diagram,
+  the Draw.io XML and the PlantUML output
+- 🔍 **Zoom & pan, highlighting, relation strength modes**
+- 📥 **Export** to Draw.io XML, SVG and PlantUML
+- ⚪ Light theme, **zero runtime dependencies**, works fully **offline**
 
 ## Usage
 
-1. Paste TypeScript code into the left editor (or drop `.ts` / `.tsx` files).
-2. The UML class diagram is rendered on the right in real time.
-3. Switch tabs: **Diagram / Draw.io XML / PlantUML**.
+1. Paste TypeScript code into the left editor, or drop `.ts` / `.tsx` files / a folder onto it.
+2. The UML class diagram appears on the right in real time.
+3. Switch tabs: **Diagram / Draw.io XML / PlantUML** (the latter two are generated on demand).
 
 ### File sidebar
 
 - **Drop a folder** to load every `.ts` / `.tsx` file inside it, recursively.
   Relative paths become folders (package name = folder path + file name).
 - **Skip rules**: directories named `dist` and `node_modules` are skipped entirely
-  (not read, not shown).
+  (not read, not shown). `package.json` and `tsconfig*.json` are read as *resolution metadata*
+  only — they never show up as files in the diagram.
 - **Folders**: create subfolders (select a folder, then `+ Folder`), rename by
   double-clicking, delete with `×` (removes everything inside).
-- **Bulk loading** uses chunked reading plus debounced parsing, so the UI stays
-  responsive and files appear as they are read.
-- **Same name in different packages**: nothing is dropped. Both classes are
-  drawn, each title qualified by its package (e.g. `Config (src/api/config.ts)`).
-  References are resolved with TypeScript's own module resolution, so
-  `import { Config } from './config'` points at the right class; when no import
-  is available an ambiguous reference is connected to every candidate and both
-  cases are listed in the banner above the view.
+- **Bulk loading** reads in chunks and parses once at the end, so a large folder appears
+  progressively without re-parsing the whole project over and over.
+- **Same name in different packages**: both classes are drawn, each title qualified by its
+  package (e.g. `Config (src/api/config.ts)`). References are resolved with TypeScript's own
+  module resolution, so `import { Config } from './config'` points at the right class. If there
+  is no import to go by, the reference is connected to every candidate and the warning banner
+  above the view tells you exactly which file and which candidates.
 - The `⊟` button at the top collapses / expands all folders.
-- **Visibility**: click the 👁 icon next to a file or folder to exclude it from
-  parsing — hidden items disappear from the diagram, the Draw.io XML and the
-  PlantUML output.
-  Clicking a folder's 👁 writes the same state to all of its subfolders and files
-  in one go; toggling a single file or folder stays independent and never
-  updates its parent or the top button.
-  The 👁 button in the top bar is a plain "hide all / show all" toggle whose
-  state follows only its own clicks.
+- **Visibility**: click the 👁 icon next to a file or folder to exclude it from parsing.
+  Clicking a folder's 👁 writes the same state to all of its subfolders and files in one go;
+  toggling a single file or folder stays independent and never updates its parent or the top
+  button. The 👁 button in the top bar is a plain "hide all / show all" toggle.
 
 ### Diagram controls
 
@@ -94,15 +101,54 @@ npm run build      # bundle to dist/bundle.js + dist/typescript.min.js
 | Zoom | Ctrl/⌘ + wheel, or `−` / `+` / `Reset` |
 | Pan | Hold the middle mouse button and drag |
 | Highlight a class | Click it |
-| Highlight a relation | Double-click it |
+| Highlight a relation | Click near it, or double-click it to pin it |
 | Relation strength | `Relations: All / Stronger / Strongest` |
+
+## FAQ
+
+**How do I generate a UML class diagram from a TypeScript project?**
+Paste the code, or drop the folder (the repo root works best — then `package.json` /
+`tsconfig.json` are picked up for cross-package resolution). No build step, no IDE plugin.
+
+**Does my code get uploaded anywhere?**
+No. Everything — the TypeScript compiler, the parser, the layout and the SVG renderer — runs in
+your browser. The bundled `server.js` only serves static files.
+
+**Can it handle a monorepo with several packages?**
+Yes. Files become packages by folder path, `@scope/pkg` imports are resolved through the
+`package.json` `name` fields you dropped in, and each `tsconfig.json`'s `paths` apply to the files
+nearest to it.
+
+**Two classes share a name — which one is drawn?**
+Both. Each gets a package-qualified title (e.g. `Config (src/b.ts)`) and a unique PlantUML alias.
+References are resolved by the file's own `import`s; when that can't decide, every candidate is
+connected and the banner reports it with the source file and candidates.
+
+**Does it support `.tsx` / JSX?**
+Yes, `.tsx` / `.jsx` are parsed with the matching script kind. `.d.ts` files are read like any
+other `.ts` file.
+
+**Can I use it without running a server?**
+Yes: `npm run build`, then open `index.html` directly. The TypeScript compiler is vendored into
+`dist/typescript.min.js`, so no network access is needed.
+
+**Can I export to PlantUML or Draw.io?**
+Yes — exported from the toolbar as `.puml` / `.drawio`, plus plain SVG. Mermaid is *not*
+supported (Mermaid diagrams are written by hand; see the comparison above).
+
+**Known limitations**
+- Type aliases are resolved, not drawn as their own nodes. A union alias expands into
+  dependencies to its members.
+- Generic type parameters (`T`) never become relations, but type arguments in heritage do
+  (`Repository<User>` → dependency on `User`).
+- Layout is deterministic, not interactive: boxes can't be dragged around.
 
 ## Project Structure
 
 ```
 CodeUML/
 ├── server.js               # Static file server (zero deps, opens the browser)
-├── index.html              # Page shell (loads styles/app.css, dist/typescript.min.js and dist/bundle.js)
+├── index.html              # Page shell (styles/app.css, dist/typescript.min.js, dist/bundle.js)
 ├── styles/
 │   └── app.css             # Page styles
 ├── src/
@@ -110,11 +156,12 @@ CodeUML/
 │   │
 │   ├── core/               # Pure logic (no DOM, independently testable)
 │   │   ├── types.ts        # Core type definitions
-│   │   ├── utils.ts        # Escaping / text width / LAYOUT constants
+│   │   ├── utils.ts        # Escaping / text width / geometry / path helpers
 │   │   ├── members.ts      # Member selection (shared by layout and rendering)
-│   │   ├── parser.ts       # Code parser
+│   │   ├── parser.ts       # Syntax pass: declarations, members, relations
+│   │   ├── resolver.ts     # Semantic pass: TypeScript Program + module resolution
+│   │   ├── merge.ts        # Multi-file merge: identity, endpoints, diagnostics
 │   │   ├── layout.ts       # Layout engine
-│   │   ├── merge.ts        # Multi-file merge / cross-file type awareness
 │   │   ├── relations.ts    # Relation strength and display modes
 │   │   ├── svg.ts          # SVG renderer
 │   │   ├── drawio.ts       # Draw.io XML exporter
@@ -122,14 +169,16 @@ CodeUML/
 │   │
 │   └── ui/                 # DOM layer
 │       ├── dom.ts          # Element lookup / HTML escaping
-│       ├── samples.ts      # Default sample code
-│       ├── highlight.ts    # Diagram highlighting
+│       ├── samples.ts      # Default sample project
+│       ├── highlight.ts    # Diagram highlighting + hit testing
 │       ├── tabs.ts         # File tabs and folders
 │       ├── panes.ts        # Split-pane resizing
 │       ├── actions.ts      # Export actions
+│       ├── scheduler.ts    # Debounced / suspendable update scheduling
+│       ├── warnings.ts     # Diagnostics banner
 │       └── zoom.ts         # Zoom & pan
 │
-├── tests/                  # Tests
+├── tests/                  # Jest tests (unit + PlantUML validator)
 └── dist/                   # Build output (bundle.js + vendored typescript.min.js)
 ```
 
@@ -152,7 +201,7 @@ CodeUML/
 
 ```bash
 npm run dev            # rebuild on change
-npm run build          # bundle to dist/bundle.js
+npm run build          # bundle to dist/bundle.js + vendor the TypeScript compiler
 npm test               # run tests (no coverage by default)
 npm run test:coverage  # run tests with a coverage report
 npm run typecheck      # type check
@@ -171,6 +220,8 @@ node server.js --check # server self-check
 | Dependency | a method parameter / return type / `new` inside a method body | dashed line + open arrow → |
 
 Multiplicity: `*` for arrays/collections, `0..1` for optional or nullable types, `1` otherwise.
+When an alias expands into a union (`type Entry = A | B`), the members become *dependencies*
+rather than ownership — an alias is not a box on the diagram.
 
 ## Supported Languages
 
@@ -182,7 +233,7 @@ Multiplicity: `*` for arrays/collections, `0..1` for optional or nullable types,
 - **TypeScript Compiler API** — syntax parsing + semantic symbol resolution
 - **SVG** — diagram rendering
 - **esbuild** — bundling
-- **Node built-in `http`** — static file server
+- **Node built-in `http`** — static file server (no runtime dependencies)
 - **Jest** — tests
 - Pure frontend, no backend services
 
